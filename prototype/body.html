@@ -44,6 +44,7 @@
     <div class="panel span-12 insights-panel"><h2>Nøkkelfunn</h2><ul class="insights" id="insights"></ul></div>
     <div class="panel span-8"><h2 id="trend-title">Hendelser per måned</h2><p class="lede" id="trend-lede"></p><div class="legend" id="trend-legend"></div><div class="chart" id="trend"></div></div>
     <div class="panel span-4"><h2 id="sub-title">Underklasser</h2><p class="lede" id="sub-lede">Én hendelse kan få flere underklasser, f.eks. ran med kniv.</p><div class="bars" id="subs"></div></div>
+    <div class="panel span-12"><h2 id="chg-title">Hvor endrer det seg?</h2><p class="lede" id="chg-lede"></p><div class="chg-grid"><div><h3>Økt mest</h3><div class="bars" id="chg-up"></div></div><div><h3>Falt mest</h3><div class="bars" id="chg-down"></div></div></div></div>
     <div class="panel span-6"><h2>Hva politiet gjorde</h2><p class="lede" id="outcomes-lede">Hentet fra teksten: hva politiet gjorde.</p><div class="bars" id="outcomes"></div></div>
     <div class="panel span-6"><h2>Hvem er omtalt</h2><p class="lede">Kjønn og aldersgruppe der teksten nevner det, f.eks. «mann i 20-årene».</p><div class="legend" id="persons-legend"></div><div class="chart" id="persons"></div></div>
   </section>
@@ -385,6 +386,31 @@ function renderInsights() {
   document.getElementById("insights").innerHTML = out.map(t => `<li>${t}</li>`).join("");
 }
 
+// Største endringer mot samme periode året før, på nivået under valgt område
+function renderChanges() {
+  const p = periodInfo(), test = clsTest(), L = childLevel(), cur = new Map(), prv = new Map();
+  const up = document.getElementById("chg-up"), down = document.getElementById("chg-down");
+  document.getElementById("chg-title").textContent = `Hvor endrer det seg? ${L.title.replace(/^Per /, "per ")}`.replace("? Kommuner", "? Kommuner").trim();
+  if (!p.prev) {
+    document.getElementById("chg-lede").textContent = "Velg «Siste 12 hele mnd» eller 2025 for å sammenligne med året før.";
+    up.innerHTML = down.innerHTML = ""; return;
+  }
+  scan(r => { if (test(r)) { const k = L.key(r); if (!L.none(k)) cur.set(k, (cur.get(k) || 0) + 1); } });
+  scan(r => { if (test(r)) { const k = L.key(r); if (!L.none(k)) prv.set(k, (prv.get(k) || 0) + 1); } }, p.prev[0], p.prev[1]);
+  const MIN = 10;
+  const rows = [...new Set([...cur.keys(), ...prv.keys()])].map(k => ({ k, label: L.label(k), c: cur.get(k) || 0, o: prv.get(k) || 0 }))
+    .filter(x => Math.max(x.c, x.o) >= MIN).map(x => ({ ...x, d: x.c - x.o }));
+  document.getElementById("chg-lede").textContent = `${tname(state.cls)}, ${p.label} mot året før. Endring i antall hendelser; bare steder med minst ${MIN} hendelser i ett av årene.`;
+  const fmt = v => `${v > 0 ? "+" : ""}${NF.format(v)}`;
+  const tip = x => `<b>${esc(x.label)}</b><br>${NF.format(x.o)} → ${NF.format(x.c)} (${fmt(x.d)}${x.o ? `, ${x.d > 0 ? "+" : ""}${PF.format(x.d / x.o)}` : ""})${L.geo(x.k) ? "<br><i>Klikk for å velge</i>" : ""}`;
+  const click = x => { const g = L.geo(x.k); if (g) setState({ geo: g }); };
+  const ups = rows.filter(x => x.d > 0).sort((a, b) => b.d - a.d).slice(0, 5).map(x => ({ ...x, v: x.d }));
+  const downs = rows.filter(x => x.d < 0).sort((a, b) => a.d - b.d).slice(0, 5).map(x => ({ ...x, v: -x.d }));
+  barList(up, ups, { fmt: v => `+${NF.format(v)}`, tipFmt: tip, onClick: click });
+  barList(down, downs, { fmt: v => `−${NF.format(v)}`, tipFmt: tip, onClick: click });
+  down.querySelectorAll(".bar-fill").forEach(b => b.classList.add("neg"));
+}
+
 function renderTrend() {
   const p = periodInfo(), test = clsTest(), a = mIdx(p.from), b = mIdx(p.to);
   const v = new Array(b - a + 1).fill(0), t = new Array(b - a + 1).fill(0);
@@ -647,7 +673,7 @@ function renderFeed() {
   document.getElementById("feed").innerHTML = items.slice(0, 60).map(s => `<article class="item">
     <div class="meta"><span class="where">${esc([s.area, s.b ? D.bydeler[s.b - 1][1] : null, s.municipality].filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i).join(", "))}</span><span>${esc(s.category)}</span><span>${fmtDate(s.created)}</span><span class="mono">${esc(s.id)}</span>${s.messages > 1 ? `<span>${s.messages} meldinger</span>` : ""}${s.active ? `<span class="live">Pågår</span>` : ""}</div>
     <p>${esc(s.text)}</p>${s.update ? `<p class="update"><b>Siste oppdatering:</b> ${esc(s.update)}</p>` : ""}
-    <div class="tags">${s.classes.map(x => `<span class="tag c">${esc(tname(x))}</span>`).join("")}${s.weapon ? `<span class="tag">våpen: ${esc(s.weapon)}</span>` : ""}${s.outcome.map(o => `<span class="tag">${esc(o)}</span>`).join("")}${s.persons.map(pp => `<span class="tag p">${esc(pp.kjønn)} · ${esc(pp.alder)}</span>`).join("")}</div>
+    <div class="tags">${s.classes.map(x => `<span class="tag c">${esc(tname(x))}</span>`).join("")}${s.weapon ? `<span class="tag">våpen: ${esc(s.weapon)}</span>` : ""}${s.outcome.filter(o => !s.classes.some(x => tname(x).toLowerCase() === o)).map(o => `<span class="tag">${esc(o)}</span>`).join("")}${s.persons.map(pp => `<span class="tag p">${esc(pp.kjønn)} · ${esc(pp.alder)}</span>`).join("")}</div>
   </article>`).join("") || `<p class="note">Ingen av hendelsene i prototypen passer filteret. Prøv en bredere klasse eller et større område.</p>`;
 }
 
@@ -809,7 +835,7 @@ function setState(patch) {
   if (!ok) state.geo = "m:0301";
   save(); render();
 }
-const VIEWS = { oversikt: [renderKpis, renderInsights, renderTrend, renderSubs, renderOutcomes, renderPersons], kart: [renderMap], fordeling: [renderFordeling], omrader: [renderAreas], tidsmonster: [renderHeat, renderSeason], klassifisering: [renderCross, renderTree, renderVariants], hendelser: [renderFeed], datamodell: [renderModel] };
+const VIEWS = { oversikt: [renderKpis, renderInsights, renderTrend, renderChanges, renderSubs, renderOutcomes, renderPersons], kart: [renderMap], fordeling: [renderFordeling], omrader: [renderAreas], tidsmonster: [renderHeat, renderSeason], klassifisering: [renderCross, renderTree, renderVariants], hendelser: [renderFeed], datamodell: [renderModel] };
 function render() {
   const sg = document.getElementById("f-geo");
   if (![...sg.options].some(o => o.value === state.geo)) sg.insertAdjacentHTML("beforeend", `<option value="${esc(state.geo)}">${esc(geoInfo().label)}</option>`);
