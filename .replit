@@ -1,0 +1,10 @@
+modules = ["nodejs-22", "python-3.12"]
+run = "cd web && npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+
+[[ports]]
+localPort = 5173
+externalPort = 80
+
+[deployment]
+build = ["sh", "-c", "cd web && npm ci && npm run build"]
+run = ["sh", "-c", "cd web && npx vite preview --host 0.0.0.0 --port 5173"]
