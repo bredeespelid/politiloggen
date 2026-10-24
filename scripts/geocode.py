@@ -11,6 +11,7 @@ Veier og tunneler geokodes ikke – de har ikke ett punkt.
 
 import argparse
 import json
+import re
 import sqlite3
 import statistics
 import time
@@ -64,9 +65,14 @@ def by_address(name: str, kommune: str):
     return lat, lon, "adresser", hits[0]["adressenavn"], "Gate"
 
 
-def by_place(name: str, kommune: str):
-    res = get(STEDSNAVN, {"sok": name, "kommunenavn": kommune, "treffPerSide": 20, "utkoordsys": 4258})
-    hits = [n for n in res.get("navn", []) if any(k["kommunenavn"].lower() == kommune.lower() for k in n.get("kommuner") or [])]
+def same_kommune(api_name: str, kommune: str) -> bool:
+    # APIet bruker offisielle flerspråklige navn, f.eks. "Harstad - Hárstták"
+    return kommune.lower() in {part.strip() for part in api_name.lower().split(" - ")}
+
+
+def by_place(name: str, kommune: str, wildcard: bool = False):
+    res = get(STEDSNAVN, {"sok": f"{name}*" if wildcard else name, "kommunenavn": kommune, "treffPerSide": 20, "utkoordsys": 4258})
+    hits = [n for n in res.get("navn", []) if any(same_kommune(k["kommunenavn"], kommune) for k in n.get("kommuner") or [])]
     if not hits:
         return None
     exact = [n for n in hits if n["skrivemåte"].lower() == name.lower()] or hits
@@ -82,9 +88,10 @@ def by_place(name: str, kommune: str):
 
 def geocode(mid: str, key: str, name: str, atype: str, kommune: str):
     query = kommune if key in ("sentrum", "(hele kommunen)") else key
+    query = re.sub(r"\s+sentrum$", "", query)  # "finnsnes sentrum" -> "finnsnes"
     try:
         hit = by_address(query, kommune) if atype == "gate" else None
-        hit = hit or by_place(query, kommune)
+        hit = hit or by_place(query, kommune) or by_place(query, kommune, wildcard=True)
     except Exception as e:
         return mid, key, None, f"feil: {e}"
     return mid, key, hit, None
@@ -95,6 +102,7 @@ def main():
     ap.add_argument("--db", default="politiloggen.db")
     ap.add_argument("--min-incidents", type=int, default=2)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--retry-missing", action="store_true", help="Prøv områder uten treff på nytt")
     args = ap.parse_args()
 
     con = sqlite3.connect(args.db)
@@ -105,8 +113,8 @@ def main():
         JOIN dim_area a USING (municipality_id, area_key)
         JOIN dim_municipality m ON m.municipality_id = a.municipality_id
         LEFT JOIN geo_area g ON g.municipality_id = a.municipality_id AND g.area_key = a.area_key
-        WHERE g.area_key IS NULL AND a.area_type NOT IN ('vei')
-        GROUP BY 1, 2 HAVING n >= ? ORDER BY n DESC""", (args.min_incidents,)).fetchall()
+        WHERE (g.area_key IS NULL OR (? AND g.lat IS NULL)) AND a.area_type NOT IN ('vei')
+        GROUP BY 1, 2 HAVING n >= ? ORDER BY n DESC""", (args.retry_missing, args.min_incidents)).fetchall()
     print(f"{len(todo):,} områder å slå opp")
 
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")

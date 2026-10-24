@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 KOMMUNEINFO = "https://api.kartverket.no/kommuneinfo/v1"
+SSB_POPULATION = "https://data.ssb.no/api/v0/no/table/07459"
 OSLO = ZoneInfo("Europe/Oslo")
 B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
@@ -77,6 +78,33 @@ def rings(geom: dict, tol: float, digits: int, min_points: int = 4) -> list:
     return out
 
 
+def population() -> tuple[dict, dict, str]:
+    """Folketall per kommune (siste år) fra SSB, nøklet på kommunenummer og på normalisert navn.
+
+    Politiloggen bruker delvis kommunenumre fra før 2024; da faller oppslaget tilbake på navn."""
+    body = json.dumps({"query": [
+        {"code": "Region", "selection": {"filter": "all", "values": ["*"]}},
+        {"code": "ContentsCode", "selection": {"filter": "item", "values": ["Personer1"]}},
+        {"code": "Tid", "selection": {"filter": "top", "values": ["1"]}}],
+        "response": {"format": "json-stat2"}}).encode()
+    req = urllib.request.Request(SSB_POPULATION, data=body, headers={"content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        d = json.load(r)
+    cat, values = d["dimension"]["Region"]["category"], d["value"]
+    year = next(iter(d["dimension"]["Tid"]["category"]["label"].values()))
+    pop, by_code = {}, {}
+    for code, i in cat["index"].items():
+        if len(code) != 4 or not values[i]:
+            continue
+        by_code[code] = values[i]
+        # "Guovdageaidnu - Kautokeino", "Herøy (Nordland)", "Drammen (2020-2023)": alle navnevarianter blir nøkler
+        label = re.sub(r"\s*\(\d{4}-\d{4}\)$", "", cat["label"][code]).lower()
+        names = {label, re.sub(r"\s*\(.*\)$", "", label)} | {part.strip() for part in re.sub(r"\s*\(.*\)$", "", label).split(" - ")}
+        for name in names:
+            pop[name] = max(pop.get(name, 0), values[i])
+    return by_code, pop, year
+
+
 def boundaries(q, n_kommuner: int):
     print("Henter grenser …")
     fylker = []
@@ -116,6 +144,8 @@ def main():
     munis = q("""SELECT m.municipality_id, m.name, m.district_id, COUNT(i.thread_id) FROM dim_municipality m
                  LEFT JOIN incident i USING (municipality_id) GROUP BY 1 ORDER BY 4 DESC, 2""")
     m_idx = {m[0]: i + 1 for i, m in enumerate(munis)}  # 0 = ukjent
+    pop_code, pop_name, pop_year = population()
+    pop_of = lambda mid, name: pop_code.get(mid) or pop_name.get(name.lower()) or pop_name.get(re.sub(r" herad$", "", name.lower()))
     categories = sorted({c for (c,) in q("SELECT DISTINCT category FROM incident")})
     c_idx = {c: i for i, c in enumerate(categories)}
     category_names = ["Ukjent kategori" if re.fullmatch(r"[0-9a-f-]{36}", c) else c for c in categories]
@@ -172,14 +202,16 @@ def main():
                                           ORDER BY created_on DESC LIMIT 80""", m[0])]
     samples = []
     for tid in dict.fromkeys(sample_ids):
-        (cat, mid, did, akey, area, created, n, active, text), = q("""
+        (cat, mid, did, akey, area, created, n, active, first, last), = q("""
             SELECT category, municipality_id, district_id, area_key, area, created_on, message_count, is_active,
-                   (SELECT text FROM message m WHERE m.thread_id = i.thread_id ORDER BY seq DESC LIMIT 1)
+                   (SELECT text FROM message m WHERE m.thread_id = i.thread_id ORDER BY created_on LIMIT 1),
+                   (SELECT text FROM message m WHERE m.thread_id = i.thread_id ORDER BY created_on DESC LIMIT 1)
             FROM incident i WHERE thread_id = ?""", tid)
+        clip = lambda t: t if len(t) <= 500 else t[:497] + "…"
         cl = classes[tid]
         samples.append({"id": tid, "category": cat, "municipality": next((x[1] for x in munis if x[0] == mid), ""),
                         "area": area, "created": created[:19] + "Z", "messages": n, "active": bool(active),
-                        "text": text if len(text) <= 600 else text[:597] + "…", "classes": [c[0] for c in cl],
+                        "text": clip(first), "update": clip(last) if n > 1 and last != first else None, "classes": [c[0] for c in cl],
                         "weapon": cl[0][1], "outcome": cl[0][2], "persons": cl[0][3],
                         "d": d_idx[did], "k": m_idx.get(mid, 0), "b": b_idx.get((mid, bydel_of.get((mid, akey))), 0)})
     samples.sort(key=lambda s: s["created"], reverse=True)
@@ -213,7 +245,8 @@ def main():
         "months": months, "tops": tops, "subs": subs,
         "taxonomy": {c: {"parent": p, "name": n} for c, (p, n) in tax.items()},
         "districts": [[d, n] for d, n in districts.items()],
-        "munis": [[m, n, d, c] for m, n, d, c in munis],
+        "munis": [[m, n, d, c, pop_of(m, n)] for m, n, d, c in munis],
+        "populationYear": pop_year,
         "categories": category_names, "areaTypes": AREA_TYPES, "outcomes": OUTCOMES, "ages": AGES,
         "weapons": weapons,
         "bydeler": [[m, b] for m, b in bydeler],
