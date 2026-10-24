@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.db
 summary.json
+__pycache__/
