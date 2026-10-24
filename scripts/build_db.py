@@ -2,7 +2,7 @@
 """Engangslast: Politiloggen CSV-eksport -> strukturert SQLite + egen klassifisering.
 
 Bruk:
-    python3 scripts/build_db.py [--export messages.csv.gz] [--db politiloggen.db] [--summary summary.json]
+    python3 scripts/build_db.py [--export messages.csv.gz] [--db politiloggen.db]
 
 Uten --export lastes eksporten ned fra APIet (ca. 21 MB, generert én gang i døgnet).
 Kun standardbibliotek. Data: Politiet, www.politiet.no/politiloggen (NLOD 2.0).
@@ -19,10 +19,8 @@ import sqlite3
 import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 
 API = "https://api.politiloggen.politiet.no"
-OSLO = ZoneInfo("Europe/Oslo")
 CLASSIFIER = "regex-v1"
 
 SCHEMA = """
@@ -357,139 +355,10 @@ def build(rows: list[dict], districts: list[dict], db_path: str):
     return con
 
 
-def summarize(con: sqlite3.Connection) -> dict:
-    q = lambda sql, *a: con.execute(sql, a).fetchall()
-    local = lambda iso: datetime.fromisoformat(iso[:19] + "+00:00").astimezone(OSLO)
-
-    inc = {r[0]: r for r in q("""SELECT thread_id, district_id, municipality, category, area, created_on,
-                                        message_count, is_active FROM incident""")}
-    classes = defaultdict(list)
-    for tid, code, weapon, outcome, persons in q(
-            "SELECT thread_id, taxonomy_code, weapon, outcome, persons FROM incident_class"):
-        classes[tid].append((code, weapon, json.loads(outcome), json.loads(persons)))
-
-    tax = {code: (parent, name) for code, parent, name in q("SELECT code, parent_code, name FROM dim_taxonomy")}
-    districts = dict(q("SELECT district_id, name FROM dim_district"))
-
-    # Per måned × underklasse × distrikt (kompakt kube til appen)
-    cube = Counter()            # underklasser (en hendelse kan ha flere)
-    cube_top = Counter()        # unike hendelser per overklasse
-    cube_all = Counter()        # alle hendelser, for normalisering
-    hour_wd = defaultdict(Counter)
-    cross = Counter()           # politiets kategori × vår overklasse (for vold-underklasser)
-    weapons, outcomes, ages = Counter(), Counter(), Counter()
-    for tid, (_, did, muni, cat, area, created, n, active) in inc.items():
-        dt = local(created)
-        month = dt.strftime("%Y-%m")
-        tops = set()
-        for code, weapon, outcome, persons in classes[tid]:
-            top = tax[code][0] or code
-            tops.add(top)
-            if tax[code][0]:
-                cube[(month, did, code)] += 1
-                hour_wd[code][(dt.weekday(), dt.hour)] += 1
-        cube_all[(month, did)] += 1
-        for top in tops:
-            cube_top[(month, did, top)] += 1
-            cross[(cat, top)] += 1
-            hour_wd[top][(dt.weekday(), dt.hour)] += 1
-        c0 = classes[tid][0]
-        if c0[1]:
-            weapons[c0[1]] += 1
-        for o in c0[2]:
-            outcomes[(tax[c0[0]][0] or c0[0], o)] += 1
-        for p in c0[3]:
-            ages[(tax[c0[0]][0] or c0[0], p["kjønn"], p["alder"])] += 1
-
-    recent = q("""SELECT i.thread_id, i.category, i.municipality, i.area, i.created_on, i.message_count, i.is_active,
-                         (SELECT text FROM message m WHERE m.thread_id = i.thread_id ORDER BY seq DESC LIMIT 1)
-                  FROM incident i ORDER BY i.created_on DESC LIMIT 200""")
-    samples = []
-    for tid, cat, muni, area, created, n, active, text in recent:
-        cl = classes[tid]
-        samples.append({"id": tid, "category": cat, "municipality": muni, "area": area,
-                        "created": created[:19] + "Z", "messages": n, "active": bool(active), "text": text,
-                        "classes": [c[0] for c in cl], "weapon": cl[0][1], "outcome": cl[0][2],
-                        "persons": cl[0][3], "district": districts.get(inc[tid][1])})
-
-    counts = {t: q(f"SELECT COUNT(*) FROM {t}")[0][0] for t in
-              ["incident", "message", "message_version", "incident_class", "dim_taxonomy", "dim_district",
-               "dim_municipality", "dim_area"]}
-    example = {
-        "incident": q("SELECT * FROM incident WHERE message_count > 2 ORDER BY created_on DESC LIMIT 1"),
-        "dim_area": q("""SELECT * FROM dim_area WHERE municipality_id = '0301' AND area_key IN ('grønland', 'storgata', 'oslo s')"""),
-        "message": q("""SELECT message_id, thread_id, seq, substr(text,1,80), has_image, is_edited, is_removed,
-                               created_on, updated_on, content_hash FROM message ORDER BY created_on DESC LIMIT 2"""),
-        "incident_class": q("""SELECT * FROM incident_class WHERE weapon IS NOT NULL
-                               ORDER BY classified_at DESC LIMIT 2"""),
-    }
-    span = q("SELECT MIN(created_on), MAX(created_on) FROM incident")[0]
-    # Områder: topp-kommuner, topp-områder per kommune, bydeler (Oslo/Bergen) og typefordeling.
-    area_meta = {(m, k): (n, t, b, v) for m, k, n, t, b, v in
-                 q("SELECT municipality_id, area_key, name, area_type, bydel, variants FROM dim_area")}
-    munis = q("""SELECT municipality_id, municipality, COUNT(*) FROM incident WHERE municipality_id IS NOT NULL
-                  GROUP BY 1 ORDER BY 3 DESC LIMIT 16""")
-    top_munis = {m for m, _, _ in munis}
-    top_areas = set()
-    for m, _, _ in munis:
-        for (k,) in q("""SELECT area_key FROM incident WHERE municipality_id = ? AND area_key IS NOT NULL
-                         AND area_key <> '(hele kommunen)' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 40""", m):
-            top_areas.add((m, k))
-    area_cube, bydel_cube, type_cube = Counter(), Counter(), Counter()
-    tops_of = {tid: {tax[c[0]][0] or c[0] for c in cl} for tid, cl in classes.items()}
-    for tid, mid, akey, created in q("SELECT thread_id, municipality_id, area_key, created_on FROM incident"):
-        if mid not in top_munis:
-            continue
-        month = local(created).strftime("%Y-%m")
-        meta = area_meta.get((mid, akey))
-        atype = meta[1] if meta else ("mangler" if not akey else "strøk")
-        bydel = meta[2] if meta else None
-        for top in tops_of[tid] | {"*"}:
-            type_cube[(month, mid, atype, top)] += 1
-            if (mid, akey) in top_areas:
-                area_cube[(month, mid, akey, top)] += 1
-            if mid in BYDELER:
-                bydel_cube[(month, mid, bydel or "(ikke koblet)", top)] += 1
-    variants = q("""SELECT municipality_id, area_key, area FROM incident
-                     WHERE area_key IN ('grünerløkka','majorstua','sentrum','grønland','e6','oslo s')
-                       AND municipality_id IN ('0301','4601') GROUP BY 1, 2, 3 ORDER BY COUNT(*) DESC""")
-    areas_out = {
-        "classifier": AREA_CLASSIFIER,
-        "munis": [[m, n, c] for m, n, c in munis],
-        "meta": {f"{m}|{k}": list(area_meta[(m, k)]) for (m, k) in top_areas if (m, k) in area_meta},
-        "cube": [[a, b, c, d, v] for (a, b, c, d), v in area_cube.items()],
-        "bydel": [[a, b, c, d, v] for (a, b, c, d), v in bydel_cube.items()],
-        "types": [[a, b, c, d, v] for (a, b, c, d), v in type_cube.items()],
-        "bydeler": {m: list(d) for m, d in BYDELER.items()},
-        "variants": [list(r) for r in variants[:40]],
-        "distinct": {"raw": q("SELECT COUNT(DISTINCT area) FROM incident")[0][0],
-                     "keys": q("SELECT COUNT(*) FROM dim_area")[0][0]},
-    }
-
-    return {
-        "areas": areas_out,
-        "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "span": span, "counts": counts, "classifier": CLASSIFIER,
-        "districts": districts,
-        "taxonomy": {code: {"parent": p, "name": n} for code, (p, n) in tax.items()},
-        "cube": [[m, d, c, v] for (m, d, c), v in sorted(cube.items())],
-        "cubeTop": [[m, d, c, v] for (m, d, c), v in sorted(cube_top.items())],
-        "cubeAll": [[m, d, v] for (m, d), v in sorted(cube_all.items())],
-        "hourWeekday": {code: [[wd, h, v] for (wd, h), v in c.items()] for code, c in hour_wd.items()},
-        "cross": [[cat, top, v] for (cat, top), v in cross.items()],
-        "weapons": weapons.most_common(),
-        "outcomes": [[t, o, v] for (t, o), v in outcomes.most_common()],
-        "persons": [[t, g, a, v] for (t, g, a), v in ages.most_common(60)],
-        "samples": samples,
-        "example": {k: [list(r) for r in v] for k, v in example.items()},
-    }
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--export", help="Lokal CSV(.gz) fra /messages/export")
     ap.add_argument("--db", default="politiloggen.db")
-    ap.add_argument("--summary", help="Skriv sammendrag (JSON) for dashbordet hit")
     args = ap.parse_args()
 
     rows = load_export(args.export)
@@ -497,10 +366,6 @@ def main():
     con = build(rows, load_districts(), args.db)
     for t in ["incident", "message", "incident_class"]:
         print(f"  {t}: {con.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0]:,}")
-    if args.summary:
-        with open(args.summary, "w", encoding="utf-8") as f:
-            json.dump(summarize(con), f, ensure_ascii=False, separators=(",", ":"))
-        print(f"Sammendrag skrevet til {args.summary}")
 
 
 if __name__ == "__main__":
