@@ -1,0 +1,38 @@
+{
+  "name": "politiloggen-mcp",
+  "version": "1.0.0",
+  "description": "MCP-server for Politiloggen (politiets operative meldinger)",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bredeespelid/politiloggen.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/bredeespelid/politiloggen/issues"
+  },
+  "homepage": "https://github.com/bredeespelid/politiloggen#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3"
+  },
+  "type": "module",
+  "bin": {
+    "politiloggen-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}
