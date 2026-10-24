@@ -35,13 +35,24 @@ CREATE TABLE dim_municipality (
   district_id     INTEGER NOT NULL REFERENCES dim_district,
   name            TEXT NOT NULL
 );
+CREATE TABLE dim_area (
+  municipality_id  TEXT NOT NULL,
+  area_key         TEXT NOT NULL,              -- vasket nøkkel, f.eks. 'grünerløkka'
+  name             TEXT NOT NULL,              -- vanligste skrivemåte
+  area_type        TEXT NOT NULL,              -- strøk, sentrum, gate, vei, kollektiv, virksomhet, natur, kommune
+  bydel            TEXT,                       -- Oslo/Bergen der entydig
+  variants         INTEGER NOT NULL,           -- antall ulike råverdier
+  classifier_version TEXT NOT NULL,
+  PRIMARY KEY (municipality_id, area_key)
+);
 CREATE TABLE incident (
   thread_id        TEXT PRIMARY KEY,
   district_id      INTEGER NOT NULL REFERENCES dim_district,
   municipality_id  TEXT REFERENCES dim_municipality,
   municipality     TEXT,
   category         TEXT NOT NULL,             -- politiets kategori, uendret
-  area             TEXT,
+  area             TEXT,                       -- råverdi
+  area_key         TEXT,                       -- -> dim_area (med municipality_id)
   is_active        INTEGER NOT NULL,
   created_on       TEXT NOT NULL,
   last_message_on  TEXT NOT NULL,
@@ -155,6 +166,88 @@ COMPILED = {code: re.compile(p) for _, (_, subs) in TAXONOMY.items() for code, (
 SUB_TOP = {code: top for top, (_, subs) in TAXONOMY.items() for code in subs}
 
 
+# ---------- Område: vask + klassifisering (area-v1) ----------
+AREA_CLASSIFIER = "area-v1"
+
+AREA_TYPES = [  # rekkefølgen betyr noe: første treff vinner
+    ("vei", r"^(e|rv|fv|riksvei|fylkesvei|europavei|kv)\s?-?\d+\b|^ring\s?\d|tunnel(en)?\b|\bbrua?\b|bru(a|en)$|bro(en|a)?$|avkjøring|rundkjøring|kryss(et)?\b|splitten$"),
+    ("gate", r"(gata|gaten|gate|veien|vei|vegen|veg|allé|alle|plass|plassen|torg|torget|bakken|stien|svingen|brygge|brygga|kaia)(\s\d+\s?\w?)?$"),
+    ("kollektiv", r"stasjon|t-?bane|jernbane|^oslo s$|terminal|lufthavn|flyplass|gardermoen|\bkai(a|en)?\b|ferje|holdeplass|busslomme"),
+    ("virksomhet", r"senter(et)?\b|skole|\bvgs\b|barnehage|sykehus|legevakt|hotell|stadion|idrettsplass|\barena\b|kirke|fengsel|butikk|utested|kafe|restaurant|bensinstasjon|camping|marina|tollsted|asylmottak|kjøpesenter"),
+    ("natur", r"fjell(et)?\b|vann(et)?\b|\bskog(en)?\b|marka\b|fjord(en)?\b|\bøy(a)?\b|elv(a|en)?\b|strand(a|en)?\b|\bholme(n)?\b|\bvik(a|en)?$"),
+]
+AREA_RX = [(t, re.compile(p)) for t, p in AREA_TYPES]
+
+ALIASES = {"majorstuen": "majorstua", "oslo sentrum": "sentrum", "bergen sentrum": "sentrum",
+           "trondheim sentrum": "sentrum", "sentrum nord": "sentrum", "sentrum sør": "sentrum",
+           "kristiansand sentrum": "sentrum", "drammen sentrum": "sentrum", "tromsø sentrum": "sentrum",
+           "stavanger sentrum": "sentrum", "midtbyen": "sentrum", "kvadraturen": "sentrum",
+           "oslo sentralstasjon": "oslo s", "gamle oslo": "gamlebyen", "grunerløkka": "grünerløkka",
+           "lokka": "grünerløkka", "løkka": "grünerløkka"}
+
+# Strøk/gater -> bydel. Bare der tilhørigheten er entydig; resten avklares med koordinater (Kartverket) senere.
+BYDELER = {
+    "0301": {  # Oslo
+        "Sentrum": "sentrum, oslo s, storgata, torggata, karl johans gate, karl johan, youngstorget, jernbanetorget, brugata, kirkeristen, rådhusplassen, aker brygge, tjuvholmen, vika, kvadraturen, egertorget, stortorvet",
+        "Gamle Oslo": "grønland, tøyen, gamlebyen, kampen, vålerenga, ensjø, helsfyr, etterstad, kværner, bjørvika, vaterland, grønlandsleiret, galgeberg",
+        "Grünerløkka": "grünerløkka, sofienberg, rodeløkka, carl berner, sinsen, hasle, løren, dælenenga, rosenhoff, schous plass, olaf ryes plass",
+        "Sagene": "sagene, torshov, bjølsen, sandaker, iladalen, ila",
+        "St. Hanshaugen": "st. hanshaugen, st.hanshaugen, bislett, fagerborg, adamstuen, bolteløkka, pilestredet, alexander kiellands plass",
+        "Frogner": "frogner, majorstua, skillebekk, uranienborg, bygdøy, briskeby, solli, homansbyen, filipstad, hjortnes",
+        "Ullern": "skøyen, ullern, lilleaker, montebello, smestad, bestum",
+        "Vestre Aker": "røa, holmenkollen, vinderen, slemdal, hovseter, voksen, sørkedalen, huseby, bogstad",
+        "Nordre Aker": "tåsen, nydalen, storo, grefsen, kjelsås, berg, korsvoll, blindern",
+        "Bjerke": "økern, bjerke, veitvet, linderud, årvoll, risløkka, tonsenhagen, refstad, ulven",
+        "Grorud": "grorud, romsås, ammerud, kalbakken, rødtvet, nordtvet",
+        "Stovner": "stovner, vestli, haugenstua, rommen, fossum, høybråten, smedstua",
+        "Alna": "furuset, alnabru, lindeberg, haugerud, trosterud, tveita, hellerud, teisen, ellingsrud, karihaugen, alfaset, alna",
+        "Østensjø": "bryn, manglerud, oppsal, bøler, abildsø, skullerud, ulsrud, godlia, østensjø",
+        "Nordstrand": "nordstrand, lambertseter, ekeberg, ljan, bekkelaget, simensbråten, munkerud, karlsrud",
+        "Søndre Nordstrand": "holmlia, mortensrud, bjørndal, hauketo, prinsdal, klemetsrud, stensrud",
+    },
+    "4601": {  # Bergen
+        "Bergenhus": "sentrum, torget, bryggen, torgallmenningen, torgalmenningen, torgallmenning, nordnes, sandviken, møhlenpris, engen, festplassen, ole bulls plass, øvre ole bulls plass, marken, vågsbunnen, strandgaten, olav kyrres gate, torggaten, nygårdsgaten, kong oscars gate, håkonsgaten, byparken, veiten, strandkaien, michael krohns gate, korskirken, christies gate, strømgaten, nøstet, zachariasbryggen, vaskerelven",
+        "Årstad": "danmarksplass, gyldenpris, kronstad, minde, landås, solheimsviken, årstad, fjøsangerveien",
+        "Fana": "fana, nesttun, paradis, skjold, hop, rådal, bønes, fanavegen",
+        "Fyllingsdalen": "fyllingsdalen, oasen",
+        "Laksevåg": "laksevåg, loddefjord, kjøkkelvik, olsvik, damsgård, damsgårdsveien, godvik",
+        "Ytrebygda": "flesland, ytrebygda, sandsli, kokstad",
+        "Arna": "arna, indre arna, ytre arna",
+        "Åsane": "åsane, eidsvåg, nyborg, tertnes, ulset, åsane senter, åsaneveien",
+    },
+}
+BYDEL_OF = {(m, name.strip()): bydel for m, d in BYDELER.items() for bydel, names in d.items()
+            for name in names.split(",")}
+
+def area_key(raw: str | None, municipality: str) -> str | None:
+    if not raw:
+        return None
+    s = norm(raw).lower().rstrip(".")
+    s = re.split(r"\s*[,/;]\s*|\s+-\s+", s)[0]                       # første ledd: "E6, Røssvoll" -> "e6"
+    s = re.sub(r"\s+(ved|v/|utenfor|nær)\s.*$", "", s)                # "e39 ved x" -> "e39"
+    s = re.sub(r"^(e|rv|fv|ring)\s*-?\s*(\d+).*$", r"\1\2", s)        # "rv 22 gansvika" -> "rv22", "ring 3" -> "ring3"
+    s = re.sub(r"(?<=\D)\s+\d+\s?[a-z]?$", "", s)                      # husnummer
+    s = s.replace("grunerløkka", "grünerløkka")
+    if s == municipality.lower():
+        return "(hele kommunen)"
+    if s.startswith(municipality.lower() + " ") and s.endswith("sentrum"):
+        s = "sentrum"
+    return ALIASES.get(s, s) or None
+
+
+def area_type(key: str | None, raw: str | None) -> str:
+    if not key:
+        return "mangler"
+    if key == "(hele kommunen)":
+        return "kommune"
+    if key == "sentrum" or key.endswith(" sentrum"):
+        return "sentrum"
+    whole = (raw or "").lower()
+    for t, rx in AREA_RX:
+        if rx.search(key) or (t == "vei" and rx.search(whole)):
+            return t
+    return "strøk"
+
 def sha(*parts) -> str:
     return hashlib.sha256("|".join("" if p is None else str(p) for p in parts).encode()).hexdigest()
 
@@ -203,7 +296,7 @@ def build(rows: list[dict], districts: list[dict], db_path: str):
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     con = sqlite3.connect(db_path)
     con.executescript("".join(f"DROP TABLE IF EXISTS {t};" for t in
-                              ["incident_class", "dim_taxonomy", "message_version", "message", "incident",
+                              ["incident_class", "dim_taxonomy", "message_version", "message", "incident", "dim_area",
                                "dim_municipality", "dim_district"]) + SCHEMA)
 
     district_by_key, muni_by_key = {}, {}
@@ -220,6 +313,7 @@ def build(rows: list[dict], districts: list[dict], db_path: str):
         for code, (sub_name, _) in subs.items():
             con.execute("INSERT INTO dim_taxonomy VALUES (?,?,?)", (code, top, sub_name))
 
+    areas = defaultdict(Counter)
     threads = defaultdict(list)
     for r in rows:
         threads[r["ThreadId"]].append(r)
@@ -232,8 +326,11 @@ def build(rows: list[dict], districts: list[dict], db_path: str):
         last = max(r["CreatedOn"] for r in msgs)
         is_active = h["IsActive"] == "True"
         row_hash = sha(h["Category"], did, mid, norm(h["Area"]), is_active, last)
-        con.execute("INSERT INTO incident VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (tid, did, mid, h["Municipality"], h["Category"], norm(h["Area"]) or None, int(is_active),
+        akey = area_key(h["Area"], h["Municipality"])
+        if akey and mid:
+            areas[(mid, akey)][norm(h["Area"])] += 1
+        con.execute("INSERT INTO incident VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (tid, did, mid, h["Municipality"], h["Category"], norm(h["Area"]) or None, akey, int(is_active),
                      h["CreatedOn"], last, len(msgs), row_hash, now, now))
         hashes = []
         for r in msgs:
@@ -252,6 +349,10 @@ def build(rows: list[dict], districts: list[dict], db_path: str):
             con.execute("INSERT INTO incident_class VALUES (?,?,?,?,?,?,?,?,?)",
                         (tid, code, CLASSIFIER, input_hash, None, weapon,
                          json.dumps(outcome, ensure_ascii=False), json.dumps(persons, ensure_ascii=False), now))
+    for (mid, akey), raws in areas.items():
+        name, _ = raws.most_common(1)[0]
+        con.execute("INSERT INTO dim_area VALUES (?,?,?,?,?,?,?)",
+                    (mid, akey, name, area_type(akey, name), BYDEL_OF.get((mid, akey)), len(raws), AREA_CLASSIFIER))
     con.commit()
     return con
 
@@ -313,16 +414,60 @@ def summarize(con: sqlite3.Connection) -> dict:
 
     counts = {t: q(f"SELECT COUNT(*) FROM {t}")[0][0] for t in
               ["incident", "message", "message_version", "incident_class", "dim_taxonomy", "dim_district",
-               "dim_municipality"]}
+               "dim_municipality", "dim_area"]}
     example = {
         "incident": q("SELECT * FROM incident WHERE message_count > 2 ORDER BY created_on DESC LIMIT 1"),
+        "dim_area": q("""SELECT * FROM dim_area WHERE municipality_id = '0301' AND area_key IN ('grønland', 'storgata', 'oslo s')"""),
         "message": q("""SELECT message_id, thread_id, seq, substr(text,1,80), has_image, is_edited, is_removed,
                                created_on, updated_on, content_hash FROM message ORDER BY created_on DESC LIMIT 2"""),
         "incident_class": q("""SELECT * FROM incident_class WHERE weapon IS NOT NULL
                                ORDER BY classified_at DESC LIMIT 2"""),
     }
     span = q("SELECT MIN(created_on), MAX(created_on) FROM incident")[0]
+    # Områder: topp-kommuner, topp-områder per kommune, bydeler (Oslo/Bergen) og typefordeling.
+    area_meta = {(m, k): (n, t, b, v) for m, k, n, t, b, v in
+                 q("SELECT municipality_id, area_key, name, area_type, bydel, variants FROM dim_area")}
+    munis = q("""SELECT municipality_id, municipality, COUNT(*) FROM incident WHERE municipality_id IS NOT NULL
+                  GROUP BY 1 ORDER BY 3 DESC LIMIT 16""")
+    top_munis = {m for m, _, _ in munis}
+    top_areas = set()
+    for m, _, _ in munis:
+        for (k,) in q("""SELECT area_key FROM incident WHERE municipality_id = ? AND area_key IS NOT NULL
+                         AND area_key <> '(hele kommunen)' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 40""", m):
+            top_areas.add((m, k))
+    area_cube, bydel_cube, type_cube = Counter(), Counter(), Counter()
+    tops_of = {tid: {tax[c[0]][0] or c[0] for c in cl} for tid, cl in classes.items()}
+    for tid, mid, akey, created in q("SELECT thread_id, municipality_id, area_key, created_on FROM incident"):
+        if mid not in top_munis:
+            continue
+        month = local(created).strftime("%Y-%m")
+        meta = area_meta.get((mid, akey))
+        atype = meta[1] if meta else ("mangler" if not akey else "strøk")
+        bydel = meta[2] if meta else None
+        for top in tops_of[tid] | {"*"}:
+            type_cube[(month, mid, atype, top)] += 1
+            if (mid, akey) in top_areas:
+                area_cube[(month, mid, akey, top)] += 1
+            if mid in BYDELER:
+                bydel_cube[(month, mid, bydel or "(ikke koblet)", top)] += 1
+    variants = q("""SELECT municipality_id, area_key, area FROM incident
+                     WHERE area_key IN ('grünerløkka','majorstua','sentrum','grønland','e6','oslo s')
+                       AND municipality_id IN ('0301','4601') GROUP BY 1, 2, 3 ORDER BY COUNT(*) DESC""")
+    areas_out = {
+        "classifier": AREA_CLASSIFIER,
+        "munis": [[m, n, c] for m, n, c in munis],
+        "meta": {f"{m}|{k}": list(area_meta[(m, k)]) for (m, k) in top_areas if (m, k) in area_meta},
+        "cube": [[a, b, c, d, v] for (a, b, c, d), v in area_cube.items()],
+        "bydel": [[a, b, c, d, v] for (a, b, c, d), v in bydel_cube.items()],
+        "types": [[a, b, c, d, v] for (a, b, c, d), v in type_cube.items()],
+        "bydeler": {m: list(d) for m, d in BYDELER.items()},
+        "variants": [list(r) for r in variants[:40]],
+        "distinct": {"raw": q("SELECT COUNT(DISTINCT area) FROM incident")[0][0],
+                     "keys": q("SELECT COUNT(*) FROM dim_area")[0][0]},
+    }
+
     return {
+        "areas": areas_out,
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "span": span, "counts": counts, "classifier": CLASSIFIER,
         "districts": districts,
