@@ -82,6 +82,7 @@
       <div class="legend" id="heat-legend"></div><div class="chart" id="heat"></div></div>
     <div class="panel span-6"><h2>Per ukedag</h2><div class="bars" id="wd-bars"></div></div>
     <div class="panel span-6"><h2>Per time</h2><div class="chart" id="hour-chart"></div></div>
+    <div class="panel span-12"><h2>Sesong</h2><p class="lede" id="season-lede"></p><div class="chart" id="season"></div></div>
   </section>
 
   <section data-view="klassifisering" class="grid" hidden>
@@ -590,6 +591,18 @@ function renderHeat() {
   lineChart(document.getElementById("hour-chart"), hours, { height: 200, endDot: false, tipFmt: p => `<b>kl. ${p.label}–${String(p.m + 1).padStart(2, "0")}</b><br>${NF.format(p.v)} hendelser · ${PF.format(tot ? p.v / tot : 0)}` });
 }
 
+// Gjennomsnitt per kalendermåned over hele datasettet (delvise første/siste måned utelates)
+function renderSeason() {
+  const test = clsTest(), mask = geoMask(), sum = new Array(12).fill(0), cnt = new Array(12).fill(0), last = MONTHS.length - 1;
+  for (let i = 1; i < last; i++) cnt[+MONTHS[i].slice(5) - 1]++;
+  for (let r = 0; r < N; r++) { const m = COL.month[r]; if (mask[r] && m > 0 && m < last && test(r)) sum[+MONTHS[m].slice(5) - 1]++; }
+  const avg = sum.map((v, i) => cnt[i] ? v / cnt[i] : 0), mean = avg.reduce((a, b) => a + b, 0) / 12;
+  const hi = avg.indexOf(Math.max(...avg)), lo = avg.indexOf(Math.min(...avg));
+  const MONTH_FULL = ["januar", "februar", "mars", "april", "mai", "juni", "juli", "august", "september", "oktober", "november", "desember"];
+  document.getElementById("season-lede").textContent = `Gjennomsnitt per måned for ${tname(state.cls).toLowerCase()} ${inGeo()}, ${MONTHS[1].slice(0, 4)}–${MONTHS[last - 1].slice(0, 4)}. ${mean ? `Flest i ${MONTH_FULL[hi]} (${PF.format(avg[hi] / mean - 1)} over snittet), færrest i ${MONTH_FULL[lo]}.` : ""} Følger ikke periodevalget.`;
+  lineChart(document.getElementById("season"), avg.map((v, i) => ({ v: Math.round(v * 10) / 10, label: MON[i], i })), { height: 200, endDot: false, tipFmt: p => `<b>${MONTH_FULL[p.i]}</b><br>${NF.format(p.v)} i snitt per år<br>${cnt[p.i]} år med data` });
+}
+
 // ---------- Klassifisering ----------
 function renderCross() {
   const cats = D.categories.map(() => new Array(TOPS.length).fill(0)), rowTot = new Array(D.categories.length).fill(0);
@@ -796,7 +809,7 @@ function setState(patch) {
   if (!ok) state.geo = "m:0301";
   save(); render();
 }
-const VIEWS = { oversikt: [renderKpis, renderInsights, renderTrend, renderSubs, renderOutcomes, renderPersons], kart: [renderMap], fordeling: [renderFordeling], omrader: [renderAreas], tidsmonster: [renderHeat], klassifisering: [renderCross, renderTree, renderVariants], hendelser: [renderFeed], datamodell: [renderModel] };
+const VIEWS = { oversikt: [renderKpis, renderInsights, renderTrend, renderSubs, renderOutcomes, renderPersons], kart: [renderMap], fordeling: [renderFordeling], omrader: [renderAreas], tidsmonster: [renderHeat, renderSeason], klassifisering: [renderCross, renderTree, renderVariants], hendelser: [renderFeed], datamodell: [renderModel] };
 function render() {
   const sg = document.getElementById("f-geo");
   if (![...sg.options].some(o => o.value === state.geo)) sg.insertAdjacentHTML("beforeend", `<option value="${esc(state.geo)}">${esc(geoInfo().label)}</option>`);
