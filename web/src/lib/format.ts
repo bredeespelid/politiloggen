@@ -30,8 +30,11 @@ export const MONTH_FULL = ["januar", "februar", "mars", "april", "mai", "juni", 
 
 export const OUT_LABEL: Record<string, string> = {
   "pågrepet": "Pågrepet", anmeldt: "Anmeldt", innbrakt: "Innbrakt (tatt med til politiet)", bortvist: "Bortvist",
-  "førerkortbeslag": "Førerkort beslaglagt", forelegg: "Bot (forelegg)",
+  "førerkortbeslag": "Førerkort beslaglagt", forelegg: "Bot (forelegg)", siktet: "Siktet", funnet: "Funnet (savnet/gjenstand)",
 };
+
+/** Aldersgruppe fra datafilen til akseetikett: barn -> «<10», 20-årene -> «20–29», 80+ -> «80+». */
+export const ageLabel = (a: string): string => (a === "barn" ? "<10" : a === "80+" ? "80+" : `${a.slice(0, 2)}–${+a.slice(0, 2) + 9}`);
 
 export const cap1 = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 

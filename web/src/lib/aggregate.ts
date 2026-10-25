@@ -2,6 +2,7 @@
  * Alle aggregeringer som rene funksjoner over en Selection (datasett + filter).
  * Ingen DOM og ingen React her, så alt kan testes direkte.
  */
+import { decodeMeta } from "../data/decode";
 import {
   areaLabel, areaRow, bydelLabel, childrenOf, dname, monthIndex, muniName, tname, topOf, type Dataset,
 } from "../data/dataset";
@@ -24,30 +25,49 @@ export interface Selection {
   period: PeriodInfo;
   test: RowTest;
   flevel: FLevel;
+  /** Alvorlighetsfilter: «*» eller lav/middels/høy. Gjelder alle tall (se scan), unntatt fordelingen på alvorlighet selv. */
+  sev: string;
+  /** verdien i meta for sev, eller -1 for alle */
+  sevIdx: number;
 }
 
-export function clsTest(ds: Dataset, c: string): RowTest {
-  if (c === "*" || !ds.app.taxonomy[c]) return () => true;
-  if (ds.app.taxonomy[c].parent) {
+/** Type (og undertype), og eventuelt alvorlighet (sevIdx >= 0, språkmodellens vurdering i de to laveste bitene av meta). */
+export function clsTest(ds: Dataset, c: string, sevIdx = -1): RowTest {
+  let base: RowTest;
+  if (c === "*" || !ds.app.taxonomy[c]) base = () => true;
+  else if (ds.app.taxonomy[c].parent) {
     const bit = ds.subBit.get(c) ?? 0;
     const S = ds.col.subs;
-    return (r) => (S[r] & bit) !== 0;
+    base = (r) => (S[r] & bit) !== 0;
+  } else {
+    const bit = ds.topBit.get(c) ?? 0;
+    const T = ds.col.tops;
+    base = (r) => (T[r] & bit) !== 0;
   }
-  const bit = ds.topBit.get(c) ?? 0;
-  const T = ds.col.tops;
-  return (r) => (T[r] & bit) !== 0;
+  if (sevIdx < 0) return base;
+  const META = ds.col.meta;
+  return (r) => (META[r] & 3) === sevIdx && base(r);
 }
 
-export function makeSelection(ds: Dataset, geo: GeoInfo, mask: Uint8Array, cls: string, period: PeriodInfo, flevel: FLevel = "bydel"): Selection {
-  return { ds, geo, mask, cls, period, test: clsTest(ds, cls), flevel };
+export function makeSelection(
+  ds: Dataset, geo: GeoInfo, mask: Uint8Array, cls: string, period: PeriodInfo, flevel: FLevel = "bydel", sev = "*",
+): Selection {
+  const sevIdx = sev === "*" ? -1 : ds.sevIdx.get(sev) ?? -1;
+  return { ds, geo, mask, cls, period, test: clsTest(ds, cls, sevIdx), flevel, sev: sevIdx < 0 ? "*" : sev, sevIdx };
 }
 
-/** Går gjennom hendelsene i valgt område og månedsintervall (inkludert begge ender). */
-export function scan(sel: Selection, fn: (r: number) => void, from = sel.period.from, to = sel.period.to, mask = sel.mask): void {
+/**
+ * Går gjennom hendelsene i valgt område og månedsintervall (inkludert begge ender).
+ * Alvorlighetsfilteret gjelder alle tall, unntatt når ignoreSev er satt.
+ */
+export function scan(
+  sel: Selection, fn: (r: number) => void, from = sel.period.from, to = sel.period.to, mask = sel.mask, ignoreSev = false,
+): void {
   const { ds } = sel;
   if (from > ds.last || to < ds.first) return;
-  const a = monthIndex(ds, from), b = monthIndex(ds, to), M = ds.col.month;
-  for (let r = 0; r < ds.n; r++) if (mask[r] && M[r] >= a && M[r] <= b) fn(r);
+  const a = monthIndex(ds, from), b = monthIndex(ds, to), M = ds.col.month, META = ds.col.meta;
+  const sev = ignoreSev ? -1 : sel.sevIdx;
+  for (let r = 0; r < ds.n; r++) if (mask[r] && M[r] >= a && M[r] <= b && (sev < 0 || (META[r] & 3) === sev)) fn(r);
 }
 
 const countBits = (mask: number, bits: number, into: number[]) => {
@@ -208,20 +228,20 @@ export function outcomeStats(sel: Selection, labels: Record<string, string> = {}
 }
 
 /**
- * Personer omtalt: persons-feltet er opptil tre sifre i base 32, hvert = 1 + kjønn*8 + aldersgruppe.
- * Teller inn i [menn, kvinner], hver med 8 aldersgrupper.
+ * Personer omtalt: persons-feltet er opptil tre sifre i base 64, hvert = 1 + kjønn*16 + aldersgruppe
+ * (kjønn 0 mann, 1 kvinne; aldersgruppene er ds.app.ages). Teller inn i [menn, kvinner].
  */
 export function decodePersons(code: number, into: [number[], number[]]): void {
   let p = code;
   while (p > 0) {
-    const d = (p % 32) - 1;
-    p = Math.floor(p / 32);
-    if (d >= 0) into[d >> 3][d & 7]++;
+    const d = (p % 64) - 1;
+    p = Math.floor(p / 64);
+    if (d >= 0 && (d >> 4) < 2) into[d >> 4][d & 15]++;
   }
 }
 
 export interface PersonStats {
-  /** [menn, kvinner] */
+  /** [menn, kvinner], hver med én verdi per aldersgruppe */
   counts: [number[], number[]];
   /** hendelser i utvalget og hvor mange av dem som nevner kjønn og alder */
   nInc: number;
@@ -231,7 +251,8 @@ export interface PersonStats {
 
 export function personStats(sel: Selection): PersonStats {
   const { ds, test } = sel;
-  const counts: [number[], number[]] = [new Array<number>(8).fill(0), new Array<number>(8).fill(0)];
+  const nA = Math.max(ds.app.ages.length, 16);
+  const counts: [number[], number[]] = [new Array<number>(nA).fill(0), new Array<number>(nA).fill(0)];
   const P = ds.col.persons;
   let nInc = 0, withP = 0;
   scan(sel, (r) => {
@@ -240,7 +261,45 @@ export function personStats(sel: Selection): PersonStats {
     if (P[r]) withP++;
     decodePersons(P[r], counts);
   });
-  return { counts, nInc, withP, total: counts[0].concat(counts[1]).reduce((a, b) => a + b, 0) };
+  const k = ds.app.ages.length;
+  const out: [number[], number[]] = [counts[0].slice(0, k), counts[1].slice(0, k)];
+  return { counts: out, nInc, withP, total: out[0].concat(out[1]).reduce((x, y) => x + y, 0) };
+}
+
+// ---------- Alvorlighet, skade og tone ----------
+
+export interface SeverityStats {
+  /** høy først (størst vekt øverst) */
+  severity: (BarItem & { value: string })[];
+  injury: BarItem[];
+  sentiment: BarItem[];
+  tot: number;
+  /** hendelser som er øvelser */
+  exercises: number;
+}
+
+/** Fordeling på alvorlighet, skade og tone. Ignorerer alvorlighetsfilteret, så alle grader alltid vises. */
+export function severityStats(sel: Selection): SeverityStats {
+  const { ds } = sel;
+  const test = clsTest(ds, sel.cls);
+  const sev = ds.app.severities.map(() => 0), inj = ds.app.injuries.map(() => 0), sent = ds.app.sentiments.map(() => 0);
+  let tot = 0, exercises = 0;
+  const META = ds.col.meta;
+  scan(sel, (r) => {
+    if (!test(r)) return;
+    const m = decodeMeta(META[r]);
+    tot++;
+    sev[m.severity]++;
+    sent[m.sentiment]++;
+    inj[m.injury]++;
+    if (m.exercise) exercises++;
+  }, sel.period.from, sel.period.to, sel.mask, true);
+  return {
+    severity: ds.app.severities.map((v, k) => ({ key: v, value: v, label: cap1(v), v: sev[k], sel: sel.sev === v })).reverse(),
+    injury: ds.app.injuries.map((l, k) => ({ key: l, label: cap1(l), v: inj[k] })),
+    sentiment: ds.app.sentiments.map((l, k) => ({ key: l, label: cap1(l), v: sent[k] })),
+    tot, exercises,
+  };
 }
 
 // ---------- Fordeling ----------
@@ -516,7 +575,7 @@ export function insights(sel: Selection): string[] {
   const { ds, geo, period: p, test } = sel;
   const c = sel.cls, lab = tname(ds, c).toLowerCase(), nTops = ds.app.tops.length;
   const cur = new Array<number>(nTops).fill(0), prv = new Array<number>(nTops).fill(0);
-  let n = 0, tot = 0, prev = 0, night = 0;
+  let n = 0, tot = 0, prev = 0, night = 0, hi = 0, hurt = 0;
   const grid = new Array<number>(168).fill(0), child = new Map<number, number>(), L = childLevel(ds, geo, sel.flevel), places = new Map<number, number>();
   const { col } = ds;
   scan(sel, (r) => {
@@ -524,6 +583,7 @@ export function insights(sel: Selection): string[] {
     countBits(col.tops[r], nTops, cur);
     if (!test(r)) return;
     n++;
+    { const m = decodeMeta(col.meta[r]); if (m.severity === 2) hi++; if (m.injury === 2 || m.injury === 3) hurt++; }
     grid[col.hourOfWeek[r]]++;
     const h = col.hourOfWeek[r] % 24;
     if (h >= 22 || h < 6) night++;
@@ -538,6 +598,7 @@ export function insights(sel: Selection): string[] {
       countBits(col.tops[r], nTops, prv);
     }, p.prev[0], p.prev[1]);
   }
+  const sevTxt = sel.sev === "*" ? "" : ` med ${sel.sev} alvorlighet`;
   const what = c === "*" ? "hendelser" : `hendelser med ${lab}`, where = inGeoText(geo), pct = (v: number) => `${(Math.round(v * 1000) / 10).toLocaleString("nb-NO")} %`;
   if (!n) return [`Ingen ${what} ${where} i perioden.`];
   const out: string[] = [];
@@ -567,11 +628,12 @@ export function insights(sel: Selection): string[] {
     for (let r = 0; r < ds.n; r++) {
       const mo = col.month[r];
       if (mo < a || mo > b) continue;
+      if (sel.sevIdx >= 0 && (col.meta[r] & 3) !== sel.sevIdx) continue;
       totAll++;
       if (test(r)) nAll++;
     }
-    if (geo.kind !== "all" && totAll) out.push(`${cap1(lab)} er **${pct(n / tot)}** av alle hendelser ${where}, mot ${pct(nAll / totAll)} i hele landet.`);
-    else out.push(`${cap1(lab)} er **${pct(n / tot)}** av alle hendelser.`);
+    if (geo.kind !== "all" && totAll) out.push(`${cap1(lab)} er **${pct(n / tot)}** av alle hendelser${sevTxt} ${where}, mot ${pct(nAll / totAll)} i hele landet.`);
+    else out.push(`${cap1(lab)} er **${pct(n / tot)}** av alle hendelser${sevTxt}.`);
   }
   const best = [...child.entries()].sort((x, y) => y[1] - x[1])[0];
   if (best && child.size > 1) {
@@ -585,6 +647,7 @@ export function insights(sel: Selection): string[] {
     const A = areaRow(ds, topPlace[0]);
     out.push(`Mest omtalte sted: **${A[0]}** (${f(topPlace[1])} hendelser${A[2] ? `, bydel ${A[2]}` : ""}).`);
   }
+  if (hi && sel.sev === "*") out.push(`**${pct(hi / n)}** av hendelsene er vurdert som alvorlige${hurt ? `, og ${f(hurt)} har alvorlig skade eller dødsfall` : ""}.`);
   const perDay = WD.map((_, d) => grid.slice(d * 24, d * 24 + 24).reduce((s, v) => s + v, 0));
   const bd = perDay.indexOf(Math.max(...perDay));
   const blocks = Array.from({ length: 8 }, (_, k) => {
@@ -775,7 +838,7 @@ export function eventCount(sel: Selection): number {
 }
 
 /** Utvalget av hendelser (samples) etter område, klasse, fritekst og periode. Listen tar med inneværende måned. */
-export function filterSamples(ds: Dataset, geo: GeoInfo, cls: string, query: string, period: PeriodInfo): Sample[] {
+export function filterSamples(ds: Dataset, geo: GeoInfo, cls: string, query: string, period: PeriodInfo, sev = "*"): Sample[] {
   const q = query.trim().toLowerCase();
   const inGeo = (s: Sample) =>
     geo.kind === "all" || (geo.kind === "d" && s.d === geo.i) || (geo.kind === "m" && s.k === geo.k) || (geo.kind === "b" && s.b === geo.b) || (geo.kind === "a" && s.a === geo.a);
@@ -786,5 +849,5 @@ export function filterSamples(ds: Dataset, geo: GeoInfo, cls: string, query: str
     const m = new Date(s.created).toLocaleDateString("sv-SE", { timeZone: "Europe/Oslo" }).slice(0, 7);
     return m >= period.from && m <= to;
   };
-  return ds.app.samples.filter((s) => inGeo(s) && inCls(s) && inText(s) && inPer(s));
+  return ds.app.samples.filter((s) => inGeo(s) && inCls(s) && inText(s) && inPer(s) && (sev === "*" || s.severity === sev));
 }

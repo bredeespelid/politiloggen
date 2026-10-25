@@ -5,7 +5,7 @@ import { PERSON_SERIES, PersonsChart } from "../components/PersonsChart";
 import { KpiRow, Panel, type KpiItem } from "../components/ui";
 import { childrenOf, tname, topOf } from "../data/dataset";
 import {
-  MIN_CHANGE, MIN_PERSONS, changeStats, days, insights, kpiStats, monthlyTrend, nationalRate, outcomeStats, personStats, subClassItems, topClassItems, years,
+  MIN_CHANGE, MIN_PERSONS, changeStats, days, insights, kpiStats, monthlyTrend, nationalRate, outcomeStats, personStats, severityStats, subClassItems, topClassItems, years,
 } from "../lib/aggregate";
 import { OUT_LABEL, fmt1, fmtNum, fmtPct, mlabel } from "../lib/format";
 import { ctx, type ViewProps } from "./types";
@@ -25,6 +25,7 @@ export default function Oversikt({ ds, sel, state, update }: ViewProps) {
   const classes = useMemo(() => (top === "*" ? topClassItems(sel) : subClassItems(sel, top)), [sel, top]);
   const outcomes = useMemo(() => outcomeStats(sel, OUT_LABEL), [sel]);
   const persons = useMemo(() => personStats(sel), [sel]);
+  const severity = useMemo(() => severityStats(sel), [sel]);
 
   const p = sel.period, yrs = years(sel);
   const bigI = k.perTop.indexOf(Math.max(...k.perTop));
@@ -127,6 +128,26 @@ export default function Oversikt({ ds, sel, state, update }: ViewProps) {
           )}
         </Panel>
       )}
+      <Panel span={12} id="sev-title" title="Alvorlighet, skade og tone"
+        lede={`${tname(ds, cls)}, ${ctx(sel)}. Språkmodellens vurdering ut fra teksten, ikke politiets. ${fmtNum(severity.tot)} hendelser${severity.exercises ? `, hvorav ${fmtNum(severity.exercises)} øvelser` : ""}.${sel.sev !== "*" ? ` Dette panelet viser alle alvorlighetsgrader; resten av siden er filtrert på «${sel.sev}».` : ""}`}>
+        <div className="grid3">
+          <div>
+            <h3>Alvorlighet</h3>
+            <BarList items={severity.severity} label="Alvorlighet" onSelect={(i) => update({ sev: state.sev === i.value ? "*" : i.value })}
+              tip={(i) => <><b>{i.label}</b><br />{fmtNum(i.v)} hendelser · {fmtPct(severity.tot ? i.v / severity.tot : 0)}<br /><i>Klikk for å filtrere</i></>} />
+          </div>
+          <div>
+            <h3>Skade på personer</h3>
+            <BarList items={severity.injury} label="Skade på personer"
+              tip={(i) => <><b>{i.label}</b><br />{fmtNum(i.v)} hendelser · {fmtPct(severity.tot ? i.v / severity.tot : 0)}</>} />
+          </div>
+          <div>
+            <h3>Tone i teksten</h3>
+            <BarList items={severity.sentiment} label="Tone i teksten"
+              tip={(i) => <><b>{i.label}</b><br />{fmtNum(i.v)} hendelser · {fmtPct(severity.tot ? i.v / severity.tot : 0)}</>} />
+          </div>
+        </div>
+      </Panel>
       <Panel span={6} id="outcomes-title" title="Hva politiet gjorde"
         lede={`Hentet fra teksten: hva politiet gjorde. ${fmtNum(outcomes.any)} av ${fmtNum(outcomes.n)} hendelser (${fmtPct(outcomes.n ? outcomes.any / outcomes.n : 0)}) nevner et utfall.`}>
         <BarList items={outcomes.items} label="Hva politiet gjorde"

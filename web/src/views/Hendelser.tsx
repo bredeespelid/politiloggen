@@ -9,7 +9,7 @@ const SHOW = 60;
 
 export default function Hendelser({ ds, sel, state, update }: ViewProps) {
   const { geo, period: p } = sel;
-  const items = useMemo(() => filterSamples(ds, geo, state.cls, state.q, p), [ds, geo, state.cls, state.q, p]);
+  const items = useMemo(() => filterSamples(ds, geo, state.cls, state.q, p, state.sev), [ds, geo, state.cls, state.q, p, state.sev]);
   const q = state.q.trim().toLowerCase();
   const all = useMemo(() => eventCount(sel), [sel]);
   return (
@@ -37,6 +37,8 @@ export default function Hendelser({ ds, sel, state, update }: ViewProps) {
                   <p>{s.text}</p>
                   {s.update && <p className="update"><b>Siste oppdatering:</b> {s.update}</p>}
                   <div className="tags">
+                    {s.exercise && <span className="tag">øvelse</span>}
+                    {s.severity === "høy" && <span className="tag sev">alvorlig</span>}
                     {s.classes.map((x) => <span key={x} className="tag c">{tname(ds, x)}</span>)}
                     {s.weapon && <span className="tag">våpen: {s.weapon}</span>}
                     {s.outcome.filter((o) => !s.classes.some((x) => tname(ds, x).toLowerCase() === o)).map((o) => <span key={o} className="tag">{o}</span>)}

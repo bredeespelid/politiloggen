@@ -58,3 +58,27 @@ export function encodeValue(value: number, width: number): string {
   for (let i = width - 1; i >= 0; i--) s += B64[Math.floor(value / 64 ** i) % 64];
   return s;
 }
+
+/** Språkmodellens vurderinger, pakket i feltet «meta» (se REC_FIELDS i build_app_data.py). */
+export interface Meta {
+  /** 0 lav, 1 middels, 2 høy */
+  severity: number;
+  /** 0 negativ, 1 nøytral, 2 positiv */
+  sentiment: number;
+  /** indeks i injuries */
+  injury: number;
+  exercise: boolean;
+  /** 0 høy, 1 middels, 2 lav */
+  confidence: number;
+}
+
+export const metaSeverity = (m: number): number => m & 3;
+
+export function decodeMeta(m: number): Meta {
+  return { severity: m & 3, sentiment: (m >> 2) & 3, injury: (m >> 4) & 7, exercise: ((m >> 7) & 1) === 1, confidence: (m >> 8) & 3 };
+}
+
+/** Motsatt vei, for tester. */
+export function encodeMeta(x: Partial<Meta>): number {
+  return (x.severity ?? 0) + 4 * (x.sentiment ?? 0) + 16 * (x.injury ?? 0) + 128 * (x.exercise ? 1 : 0) + 256 * (x.confidence ?? 0);
+}

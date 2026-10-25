@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent } from "react";
-import { fmtNum, nice } from "../lib/format";
+import { ageLabel, fmtNum, nice } from "../lib/format";
 import { useWidth } from "../lib/hooks";
 import { useTip } from "./Tooltip";
 
@@ -25,7 +25,7 @@ export function PersonsChart({ counts, ages }: Props) {
   const y = (v: number) => m.t + (H - m.t - m.b) * (1 - v / max);
   const x0 = (i: number, j: number) => m.l + bw * i + bw / 2 - b - 1 + j * (b + 2);
 
-  const content = (i: number, j: number) => <><b>{PERSON_SERIES[j].name}, {ages[i]}</b><br />{fmtNum(counts[j][i])} omtalt</>;
+  const content = (i: number, j: number) => <><b>{PERSON_SERIES[j].name}, {ages[i] === "barn" ? "under 10 år" : ages[i]}</b><br />{fmtNum(counts[j][i])} omtalt</>;
   const showFocus = (i: number, j: number, svg: SVGSVGElement) => {
     setActive([i, j]);
     const r = svg.getBoundingClientRect();
@@ -79,7 +79,7 @@ export function PersonsChart({ counts, ages }: Props) {
                 </g>
               );
             })}
-            <text className="lbl" x={m.l + bw * i + bw / 2} y={H - 6} textAnchor="middle">{`${a.slice(0, 2)}–${+a.slice(0, 2) + 9}`}</text>
+            <text className="lbl" x={m.l + bw * i + bw / 2} y={H - 6} textAnchor="middle">{ageLabel(a)}</text>
           </g>
         ))}
       </svg>

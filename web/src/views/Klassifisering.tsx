@@ -44,7 +44,11 @@ export default function Klassifisering({ ds, sel, state, scheme }: ViewProps) {
       </Panel>
       <Panel span={5} id="weapons-title" title="Våpen nevnt" lede={`${tname(ds, state.cls)}, ${ctx(sel)}.`}>
         <BarList items={tax.weapons} label="Våpen nevnt" />
-        <p className="note">Klassifisert automatisk med nøkkelord (versjon regex-v1). En språkmodell vil skille bedre, f.eks. «stukket av» fra knivstikking.</p>
+        <p className="note">
+          {ds.app.classifierModel
+            ? `Klassifisert av en språkmodell (${ds.app.classifierModel}, ${ds.app.classifier}) som har lest teksten i hver hendelse. Det finnes ingen fasit, så dette er modellens vurdering, ikke politiets.`
+            : "Klassifisert automatisk med nøkkelord. Det finnes ingen fasit."}
+        </p>
       </Panel>
       <Panel span={12} id="variants-title" title="Slik vaskes stedsnavn"
         lede={`Politiet skriver stedet som fritekst. ${fmtNum(ds.app.distinctAreas.raw)} ulike skrivemåter blir ${fmtNum(ds.app.distinctAreas.keys)} steder etter vasking (hele landet). Eksempler fra ${muniName(ds, ds.muniIdx.get(variantMuni) ?? 0)}:`}>

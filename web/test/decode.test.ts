@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeRecords, encodeValue } from "../src/data/decode";
+import { decodeMeta, decodeRecords, encodeMeta, encodeValue } from "../src/data/decode";
 import { encodeRecs, REC_FIELDS, RECS } from "./fixture";
 
 describe("encodeValue", () => {
@@ -44,11 +44,25 @@ describe("decodeRecords", () => {
 
   it("decoder ekte fixture-streng fra Python-formatet", () => {
     // month=3, hourOfWeek=130, district=0, muni=4 ... alt annet 0
-    const s = "D" + "CC" + "A" + "AE" + "A" + "AA" + "AAAAA" + "A" + "AAA" + "AAA" + "A" + "A" + "A";
+    const s = "D" + "CC" + "A" + "AE" + "A" + "AA" + "AAAAA" + "AA" + "AAA" + "AAA" + "A" + "A" + "A" + "AA";
     const { n, col } = decodeRecords(s, REC_FIELDS);
     expect(n).toBe(1);
     expect(col.month[0]).toBe(3);
     expect(col.hourOfWeek[0]).toBe(2 * 64 + 2);
     expect(col.muni[0]).toBe(4);
+  });
+});
+
+describe("meta (språkmodellens vurderinger)", () => {
+  it("pakker ut alvorlighet, tone, skade, øvelse og sikkerhet fra bitfeltene", () => {
+    // severity 2 | sentiment 0 << 2 | injury 3 << 4 | exercise 1 << 7 | confidence 2 << 8
+    expect(decodeMeta(2 + 0 + 48 + 128 + 512)).toEqual({ severity: 2, sentiment: 0, injury: 3, exercise: true, confidence: 2 });
+    expect(decodeMeta(0)).toEqual({ severity: 0, sentiment: 0, injury: 0, exercise: false, confidence: 0 });
+  });
+  it("er omvendt av encodeMeta, og får plass i to base64-tegn", () => {
+    const m = { severity: 1, sentiment: 2, injury: 4, exercise: true, confidence: 1 };
+    const v = encodeMeta(m);
+    expect(decodeMeta(v)).toEqual(m);
+    expect(v).toBeLessThan(64 ** 2);
   });
 });

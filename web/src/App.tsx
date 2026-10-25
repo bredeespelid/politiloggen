@@ -77,7 +77,7 @@ function Dashboard({ ds }: { ds: Dataset }) {
   const geo = useMemo(() => geoInfo(ds, state.geo), [ds, state.geo]);
   const mask = useMemo(() => geoMask(ds, geo), [ds, geo]);
   const period = useMemo(() => periodInfo(state.period, ds.first, ds.last), [ds, state.period]);
-  const sel = useMemo(() => makeSelection(ds, geo, mask, state.cls, period, state.flevel), [ds, geo, mask, state.cls, period, state.flevel]);
+  const sel = useMemo(() => makeSelection(ds, geo, mask, state.cls, period, state.flevel, state.sev), [ds, geo, mask, state.cls, period, state.flevel, state.sev]);
 
   useEffect(() => tip.hide(), [tip, sel, state.tab, state.dmode]);
   useEffect(() => {
@@ -103,7 +103,7 @@ function Dashboard({ ds }: { ds: Dataset }) {
       </main>
       <footer>
         <span>Kilde: Politiet – <a href="https://www.politiet.no/politiloggen" target="_blank" rel="noopener">www.politiet.no/politiloggen</a> (NLOD 2.0) · Kart og stedsnavn: Kartverket</span>
-        <span>Databasen: {fmtNum(ds.n)} hendelser fra {fmtDate(ds.app.span[0])} til {fmtDate(ds.app.span[1])}. Klassifisering {ds.app.classifier}, steder {ds.app.areaClassifier}.</span>
+        <span>Databasen: {fmtNum(ds.n)} hendelser fra {fmtDate(ds.app.span[0])} til {fmtDate(ds.app.span[1])}. Klassifisering {ds.app.classifier}{ds.app.classifierModel ? ` (${ds.app.classifierModel})` : ""}, steder {ds.app.areaClassifier}.</span>
         <span>Politiloggen viser det operasjonssentralene publiserer. Det er ikke kriminalstatistikk.</span>
       </footer>
     </>

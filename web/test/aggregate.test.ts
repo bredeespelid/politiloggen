@@ -89,13 +89,14 @@ describe("kpiStats", () => {
 describe("utfall og personer", () => {
   it("teller utfall som bitmaske og dekning", () => {
     const o = outcomeStats(sel("all", "vold"), { "pågrepet": "Pågrepet" });
-    expect(o.items.map((i) => [i.label, i.v])).toEqual([["Pågrepet", 2], ["anmeldt", 2]]);
+    expect(o.items.map((i) => [i.label, i.v])).toEqual([["Pågrepet", 2], ["siktet", 2]]);
     expect(o).toMatchObject({ n: 4, any: 3 });
   });
   it("pakker ut opptil tre personer per hendelse", () => {
     const { counts, nInc, withP, total } = personStats(sel("all"));
-    expect(counts[0]).toEqual([1, 2, 0, 0, 0, 0, 0, 0]);
-    expect(counts[1]).toEqual([0, 0, 1, 0, 0, 0, 0, 2]);
+    // 9 aldersgrupper: barn, 10-årene … 80+
+    expect(counts[0]).toEqual([1, 2, 0, 0, 0, 0, 0, 0, 0]);
+    expect(counts[1]).toEqual([0, 0, 1, 0, 0, 0, 0, 2, 0]);
     expect([nInc, withP, total]).toEqual([6, 3, 6]);
   });
 });

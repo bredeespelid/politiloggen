@@ -116,6 +116,12 @@ export function Filters({ ds, state, geo, update }: Props) {
       <label>Type hendelse
         <select value={state.cls} onChange={(e) => update({ cls: e.target.value })}>{clsOptions}</select>
       </label>
+      <label>Alvorlighet
+        <select value={state.sev} onChange={(e) => update({ sev: e.target.value })}>
+          <option value="*">Alle</option>
+          {[...ds.app.severities].reverse().map((v) => <option key={v} value={v}>{v.charAt(0).toUpperCase() + v.slice(1)}</option>)}
+        </select>
+      </label>
       <div className="field">
         <span className="field-label" id="period-label">Periode</span>
         <Segmented<PeriodKey>
@@ -125,7 +131,7 @@ export function Filters({ ds, state, geo, update }: Props) {
         />
       </div>
       {!isDefaultFilter(state) && (
-        <button type="button" className="reset" onClick={() => update({ geo: DEFAULT_GEO, cls: "*", period: "12m" })}>
+        <button type="button" className="reset" onClick={() => update({ geo: DEFAULT_GEO, cls: "*", period: "12m", sev: "*" })}>
           Nullstill filter (Oslo, alle hendelser)
         </button>
       )}

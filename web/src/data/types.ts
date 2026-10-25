@@ -2,7 +2,7 @@
 
 export type RecFieldName =
   | "month" | "hourOfWeek" | "district" | "muni" | "category" | "tops" | "subs"
-  | "outcomes" | "persons" | "area" | "areaType" | "bydel" | "weapon";
+  | "outcomes" | "persons" | "area" | "areaType" | "bydel" | "weapon" | "meta";
 
 /** [feltnavn, antall base64-tegn] */
 export type RecField = [RecFieldName, number];
@@ -41,6 +41,10 @@ export interface Sample {
   b: number;
   /** stedsindeks (1-basert, 0 = ukjent sted) */
   a: number;
+  /** språkmodellens vurdering (null for hendelser uten LLM-rad) */
+  severity?: string | null;
+  sentiment?: string | null;
+  exercise?: boolean;
 }
 
 /** Ring av [lon, lat]-punkter. */
@@ -69,12 +73,18 @@ export interface AppData {
   generated: string;
   span: [string, string];
   classifier: string;
+  /** modellen som klassifiserte (llm-v1); null/mangler for nøkkelordversjonen */
+  classifierModel?: string | null;
   areaClassifier: string;
   recFields: RecField[];
   rec: string;
   months: string[];
   tops: string[];
   subs: string[];
+  /** alvorlighet, tone og skade: indeks = verdien i «meta» */
+  severities: string[];
+  sentiments: string[];
+  injuries: string[];
   taxonomy: Record<string, TaxonomyEntry>;
   /** [distrikts-id, navn] */
   districts: [number, string][];

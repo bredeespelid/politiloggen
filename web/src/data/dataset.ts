@@ -12,6 +12,8 @@ export interface Dataset {
   muniIdx: Map<string, number>;
   bydelIdx: Map<string, number>;
   distIdx: Map<string, number>;
+  /** Alvorlighet (lav, middels, høy) -> verdi i meta. */
+  sevIdx: Map<string, number>;
   /** Bit for hver overklasse/underklasse i tops/subs-maskene. */
   topBit: Map<string, number>;
   subBit: Map<string, number>;
@@ -27,6 +29,7 @@ export function buildDataset(app: AppData): Dataset {
     muniIdx: new Map(app.munis.map((m, i) => [m[0], i + 1])),
     bydelIdx: new Map(app.bydeler.map((b, i) => [`${b[0]}|${b[1]}`, i + 1])),
     distIdx: new Map(app.districts.map((d, i) => [String(d[0]), i])),
+    sevIdx: new Map((app.severities ?? []).map((s, i) => [s, i])),
     topBit: new Map(app.tops.map((t, i) => [t, 2 ** i])),
     subBit: new Map(app.subs.map((s, i) => [s, 2 ** i])),
   };

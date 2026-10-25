@@ -285,3 +285,8 @@ nav.tabs a.meta { margin-left: auto; }
 .bar-fill.neg { background: var(--muted); }
 
 .panel > .seg { justify-self: start; max-width: 100%; }
+
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+@media (max-width: 800px) { .grid3 { grid-template-columns: 1fr; } }
+.grid3 h3 { font: 600 13px var(--font-body); margin: 0 0 6px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .06em; }
+.tag.sev { border-color: var(--flag); color: var(--flag); }
