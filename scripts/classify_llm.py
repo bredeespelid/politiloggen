@@ -107,7 +107,7 @@ Rules:
 - injury: the most serious injury to any person: {", ".join(INJURY)}. "ingen" if stated or clearly irrelevant, "ukjent" if the text does not say.
 - severity: {", ".join(SEVERITY)}. lav = nuisance or minor, no one hurt; middels = a crime or accident with limited harm; høy = serious injury or death, weapon used against a person, fire in an occupied building, a vulnerable person missing.
 - outcome: what the police did, as stated in the text: {", ".join(OUTCOME)} ("funnet" = missing person or item found). Use ["ingen"] when no outcome is stated.
-- persons: people described by gender and age group, at most 6, from phrases like "mann i 30-årene". Gender: {", ".join(GENDER)}. age_group: {", ".join(AGE)}. Empty list when no person is described.
+- persons: only people whose gender OR age is stated in the text, at most 6, from phrases like "mann i 30-årene" or "to kvinner". Gender: {", ".join(GENDER)}. age_group: {", ".join(AGE)}. Do not add entries where both would be "ukjent". Empty list when no such person is described.
 - status: "pågår" if the last message says the police are on scene, searching or the situation is ongoing; "avsluttet" if resolved; otherwise "ukjent".
 - sentiment: the tone of the event for the people involved: negativ (harm, threat, danger, loss), positiv (resolved well, e.g. missing person found safe, fire put out without injuries), nøytral (routine or purely informational).
 - confidence: your confidence in the classification: {", ".join(CONFIDENCE)}.
