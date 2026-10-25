@@ -3,3 +3,4 @@ dist/
 *.db
 summary.json
 __pycache__/
+web/public/app.json
