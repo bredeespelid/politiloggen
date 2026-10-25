@@ -5,3 +5,4 @@ summary.json
 __pycache__/
 web/public/app.json
 .claude/worktrees/
+llm_work/
