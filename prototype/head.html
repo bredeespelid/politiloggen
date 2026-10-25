@@ -804,7 +804,7 @@ td.cell { text-align: right; font-variant-numeric: tabular-nums; min-width: 56px
 .leaflet-control-zoom a:hover { background: var(--surface-2); }
 .leaflet-tooltip { background: var(--ink); color: var(--bg); border: 0; border-radius: 4px; box-shadow: 0 4px 14px rgba(0,0,0,.2); font: 12px/1.4 var(--font-body); }
 .leaflet-tooltip-top:before { border-top-color: var(--ink); }
-.leaflet-tooltip.place { background: transparent; color: var(--ink-2); box-shadow: none; font-weight: 600; font-size: 11px; padding: 0; text-shadow: 0 0 3px var(--land), 0 0 3px var(--land); }
+.leaflet-tooltip.place { background: transparent; color: var(--ink); box-shadow: none; font-weight: 600; font-size: 11px; padding: 0; text-shadow: 0 0 2px var(--land), 0 0 3px var(--land), 0 0 5px var(--land); }
 .leaflet-tooltip.place:before { display: none; }
 .leaflet-tooltip.bydel { background: transparent; border: 0; box-shadow: none; padding: 0; color: var(--muted); font: 700 11px/1 var(--font-body); letter-spacing: .08em; text-transform: uppercase; text-shadow: 0 0 3px var(--land), 0 0 3px var(--land), 0 0 6px var(--land); }
 .leaflet-tooltip.bydel:before { display: none; }
@@ -828,6 +828,14 @@ tr.drill:focus-visible { outline: 2px solid var(--accent); }
 @media (max-width: 700px) { .chg-grid { grid-template-columns: 1fr; } }
 .chg-grid h3 { font: 600 13px var(--font-body); margin: 0 0 6px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .06em; }
 .bar-fill.neg { background: var(--muted); }
+.leaflet-heatmap-layer { pointer-events: none; }
+.leaflet-tile-pane { filter: grayscale(1) contrast(.62) brightness(1.18); }
+#map.dark .leaflet-tile-pane { filter: invert(1) grayscale(1) contrast(.6) brightness(.78); }
+.basetiles img { image-rendering: auto; }
+.leaflet-tooltip.place b { font-weight: 700; color: var(--accent); }
+.place-search { width: 210px; }
+.place-search input { width: 100%; }
+#f-level { margin-bottom: 8px; }
 .map-ctrls { display: flex; flex-wrap: wrap; gap: 8px; }
 .intro { display: grid; gap: 6px; max-width: 90ch; }
 .intro p { margin: 0; color: var(--ink-2); font-size: 15px; }

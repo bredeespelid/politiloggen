@@ -30,6 +30,7 @@
   </div>
   <div class="filters" id="filters">
     <label for="f-geo">Område<select id="f-geo"></select></label>
+    <label for="f-place" class="search place-search">Finn sted<input id="f-place" type="search" list="places" placeholder="F.eks. Grønland" autocomplete="off"></label><datalist id="places"></datalist>
     <label for="f-class">Type hendelse<select id="f-class"></select></label>
     <div style="display:grid;gap:4px"><span style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600">Periode</span>
       <div class="seg" id="f-period" role="group" aria-label="Periode">
@@ -64,6 +65,7 @@
 
   <section data-view="fordeling" class="grid" hidden>
     <div class="panel span-5"><h2 id="f-title">Fordeling</h2><p class="lede" id="f-lede"></p>
+      <div class="seg" id="f-level" role="group" aria-label="Nivå" hidden><button type="button" data-l="bydel">Bydeler</button><button type="button" data-l="sted">Steder (Grønland osv.)</button></div>
       <div class="seg" id="d-mode" role="group" aria-label="Måltall"><button type="button" data-m="pop">Per 1 000 innbyggere</button><button type="button" data-m="share">Andel av områdets hendelser</button><button type="button" data-m="abs">Antall</button></div>
       <div class="bars" id="dist-bars"></div>
       <p class="note" id="f-note"></p></div>
@@ -189,17 +191,18 @@ const PERIODS = {
 const periodInfo = () => PERIODS[state.period]();
 
 // ---------- Tilstand ----------
-const state = { geo: "m:0301", cls: "*", period: "12m", dmode: "pop", tab: "oversikt", mview: "geo", mkind: "heat" };
+const state = { geo: "m:0301", cls: "*", period: "12m", dmode: "pop", tab: "oversikt", mview: "geo", mkind: "heat", flevel: "bydel" };
 const STORE = "pl-state-v2";
 try { Object.assign(state, JSON.parse(localStorage.getItem(STORE) || "{}")); } catch {}
-const save = () => { try { const { geo, cls, period, dmode, mview, mkind } = state; localStorage.setItem(STORE, JSON.stringify({ geo, cls, period, dmode, mview, mkind })); } catch {} };
+const save = () => { try { const { geo, cls, period, dmode, mview, mkind, flevel } = state; localStorage.setItem(STORE, JSON.stringify({ geo, cls, period, dmode, mview, mkind, flevel })); } catch {} };
 
-// Område: "all" | "d:<distrikts-id>" | "m:<kommunenr>" | "b:<kommunenr>|<bydel>"
+// Område: "all" | "d:<distrikts-id>" | "m:<kommunenr>" | "b:<kommunenr>|<bydel>" | "a:<stedsindeks>" (ett enkelt sted, f.eks. Grønland)
 function geoInfo(g = state.geo) {
   const [kind, id] = g === "all" ? ["all", null] : [g.slice(0, 1), g.slice(2)];
   if (kind === "d") { const i = DIST_IDX[id]; return { kind, i, label: dname(i), test: r => COL.district[r] === i }; }
   if (kind === "m") { const k = MUNI_IDX[id]; return { kind, k, id, label: muniName(k), test: r => COL.muni[r] === k, hasBydel: D.bydeler.some(b => b[0] === id) }; }
   if (kind === "b") { const b = BYDEL_IDX[id], [mid, name] = id.split("|"); return { kind, b, id: mid, k: MUNI_IDX[mid], label: `${name} (${muniName(MUNI_IDX[mid])})`, test: r => COL.bydel[r] === b, hasBydel: true }; }
+  if (kind === "a") { const a = +id, A = area(a); return { kind, a, k: A[5], id: D.munis[A[5] - 1][0], label: `${areaLabel(A)}, ${muniName(A[5])}`, test: r => COL.area[r] === a }; }
   return { kind: "all", label: "Hele landet", test: () => true };
 }
 let geoCache = { key: null, mask: null };
@@ -214,8 +217,8 @@ function clsTest(c = state.cls) {
   const bit = 1 << TOPS.indexOf(c); return r => (COL.tops[r] & bit) !== 0;
 }
 // Går gjennom hendelsene i valgt område og månedsintervall.
-function scan(fn, from = periodInfo().from, to = periodInfo().to) {
-  const mask = geoMask(), a = mIdx(from), b = mIdx(to), M = COL.month;
+function scan(fn, from = periodInfo().from, to = periodInfo().to, mask = geoMask()) {
+  const a = mIdx(from), b = mIdx(to), M = COL.month;
   if (from > LAST || to < MONTHS[0]) return;
   for (let r = 0; r < N; r++) if (mask[r] && M[r] >= a && M[r] <= b) fn(r);
 }
@@ -345,12 +348,13 @@ function renderInsights() {
   const p = periodInfo(), g = geoInfo(), c = state.cls, test = clsTest(), lab = tname(c).toLowerCase();
   const T = TOPS.length, cur = new Array(T).fill(0), prv = new Array(T).fill(0);
   let n = 0, tot = 0, prev = 0, night = 0;
-  const grid = new Array(168).fill(0), child = new Map(), L = childLevel();
+  const grid = new Array(168).fill(0), child = new Map(), L = childLevel(), places = new Map();
   scan(r => {
     tot++; for (let k = 0; k < T; k++) if (COL.tops[r] & (1 << k)) cur[k]++;
     if (!test(r)) return;
     n++; grid[COL.hourOfWeek[r]]++; const h = COL.hourOfWeek[r] % 24; if (h >= 22 || h < 6) night++;
     const k = L.key(r); if (!L.none(k)) child.set(k, (child.get(k) || 0) + 1);
+    const pa = COL.area[r]; if (pa) places.set(pa, (places.get(pa) || 0) + 1);
   });
   if (p.prev) scan(r => { if (test(r)) prev++; for (let k = 0; k < T; k++) if (COL.tops[r] & (1 << k)) prv[k]++; }, p.prev[0], p.prev[1]);
   const out = [];
@@ -375,7 +379,9 @@ function renderInsights() {
     else out.push(`${cap1(lab)} er <b>${PF.format(n / tot)}</b> av alle hendelser.`);
   }
   const best = [...child.entries()].sort((x, y) => y[1] - x[1])[0];
-  if (best && child.size > 1) out.push(`Flest i <b>${esc(L.label(best[0]))}</b>: ${NF.format(best[1])} hendelser, ${PF.format(best[1] / n)} av ${esc(what)}.`);
+  if (best && child.size > 1) out.push(g.kind === "a" ? `Vanligste kategori hos politiet: <b>${esc(L.label(best[0]))}</b> (${NF.format(best[1])} hendelser).` : `Flest i <b>${esc(L.label(best[0]))}</b>: ${NF.format(best[1])} hendelser, ${PF.format(best[1] / n)} av ${esc(what)}.`);
+  const topPlace = g.kind === "a" ? null : [...places.entries()].filter(([a]) => !["vei", "kommune", "sentrum"].includes(area(a)[1])).sort((x, y) => y[1] - x[1])[0];
+  if (topPlace) out.push(`Mest omtalte sted: <b>${esc(area(topPlace[0])[0])}</b> (${NF.format(topPlace[1])} hendelser${area(topPlace[0])[2] ? `, bydel ${esc(area(topPlace[0])[2])}` : ""}).`);
   const days = WD.map((_, d) => grid.slice(d * 24, d * 24 + 24).reduce((s, v) => s + v, 0));
   const bd = days.indexOf(Math.max(...days));
   const blocks = Array.from({ length: 8 }, (_, k) => { let s = 0; for (let d = 0; d < 7; d++) for (let h = k * 3; h < k * 3 + 3; h++) s += grid[d * 24 + h]; return s; });
@@ -390,6 +396,8 @@ function renderInsights() {
 function renderChanges() {
   const p = periodInfo(), test = clsTest(), L = childLevel(), cur = new Map(), prv = new Map();
   const up = document.getElementById("chg-up"), down = document.getElementById("chg-down");
+  const panel = up.closest(".panel"); panel.hidden = geoInfo().kind === "a"; // for få hendelser på ett enkelt sted
+  if (panel.hidden) return;
   document.getElementById("chg-title").textContent = `Hvor endrer det seg? ${L.title.replace(/^Per /, "per ")}`.replace("? Kommuner", "? Kommuner").trim();
   if (!p.prev) {
     document.getElementById("chg-lede").textContent = "Velg «Siste 12 hele mnd» eller 2025 for å sammenligne med året før.";
@@ -465,7 +473,7 @@ function renderPersons() {
   scan(r => { if (!test(r)) return; nInc++; if (COL.persons[r]) withP++; let p = COL.persons[r]; while (p > 0) { const d = (p % 32) - 1; p = Math.floor(p / 32); S[d >> 3][d & 7]++; } });
   const ser = [["Menn/gutter", "var(--series)"], ["Kvinner/jenter", "var(--series-2)"]];
   const totalP = S[0].concat(S[1]).reduce((a, b) => a + b, 0);
-  if (totalP < 10) { document.getElementById("persons-legend").innerHTML = ""; el.innerHTML = `<p class="note">Bare ${NF.format(totalP)} personer er omtalt med kjønn og alder i utvalget – for få til å vise en fordeling. Prøv et større område eller en lengre periode.</p>`; return; }
+  if (totalP < 10) { document.getElementById("persons-legend").innerHTML = ""; el.innerHTML = `<p class="note">${totalP ? `Bare ${NF.format(totalP)} personer er omtalt` : "Ingen personer er omtalt"} med kjønn og alder i utvalget – for få til å vise en fordeling. Prøv et større område eller en lengre periode.</p>`; return; }
   document.getElementById("persons-legend").innerHTML = ser.map(([n, c]) => `<span><span class="sw" style="background:${c}"></span>${n}</span>`).join("");
   const W = Math.max(260, el.clientWidth || 500), H = 200, m = { l: 40, r: 8, t: 10, b: 24 };
   const max = nice(Math.max(1, ...S[0], ...S[1]));
@@ -494,14 +502,17 @@ function childLevel() {
 function childLevelRaw(g) {
   if (g.kind === "all") return { title: "Per politidistrikt", key: r => COL.district[r], label: k => dname(k), geo: k => `d:${D.districts[k][0]}`, pop: k => geoPop({ kind: "d", i: k }), none: () => false, note: "Distriktene publiserer svært ulikt. Andel av eget volum egner seg derfor bedre til sammenligning enn antall." };
   if (g.kind === "d") return { title: `Kommuner i ${g.label}`, key: r => COL.muni[r], label: k => muniName(k), geo: k => k ? `m:${D.munis[k - 1][0]}` : null, pop: k => k ? D.munis[k - 1][4] : null, limit: 15 };
-  if (g.kind === "m" && g.hasBydel) return { title: `Bydeler i ${g.label}`, key: r => COL.bydel[r], label: bydelLabel, geo: k => k ? `b:${D.bydeler[k - 1].join("|")}` : null, note: "«Uten bydel» er veier og tunneler (E6, E18, Ring 3), hendelser uten oppgitt sted og steder som ennå ikke er knyttet til bydel. Bydelstallene er derfor et minimum." };
-  return { title: `Områder i ${g.label}`, key: r => COL.area[r], label: k => k ? areaLabel(area(k)) : "Øvrige/ukjent", geo: () => null, limit: 15 };
+  if (g.kind === "a") return { title: `Politiets kategorier på stedet`, key: r => COL.category[r], label: k => D.categories[k], geo: () => null, none: () => false, limit: 12 };
+  if (g.kind === "m" && g.hasBydel && state.flevel !== "sted") return { title: `Bydeler i ${g.label}`, key: r => COL.bydel[r], label: bydelLabel, geo: k => k ? `b:${D.bydeler[k - 1].join("|")}` : null, note: "«Uten bydel» er veier og tunneler (E6, E18, Ring 3), hendelser uten oppgitt sted og steder som ennå ikke er knyttet til bydel. Bydelstallene er derfor et minimum." };
+  return { title: `Steder i ${g.label}`, key: r => COL.area[r], label: k => k ? areaLabel(area(k)) : "Uten oppgitt sted", geo: k => k ? `a:${k}` : null, limit: 15, note: "Steder er stedsnavnene politiet oppgir (strøk, gater, sentrum), vasket og samlet. Klikk et sted for å se bare det." };
 }
 function renderFordeling() {
   const p = periodInfo(), test = clsTest(), L = childLevel(), a = mIdx(p.from), b = mIdx(p.to);
   // Per innbygger finnes bare for kommuner/distrikter; andel gir ikke mening for alle hendelser (alltid 100 %).
   const modes = [L.pop ? "pop" : null, state.cls !== "*" ? "share" : null, "abs"].filter(Boolean);
   const mode = modes.includes(state.dmode) ? state.dmode : modes[0];
+  const g0 = geoInfo(), lv = document.getElementById("f-level"); lv.hidden = !(g0.kind === "m" && g0.hasBydel);
+  lv.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.l === (state.flevel || "bydel")));
   document.querySelectorAll("#d-mode button").forEach(x => { x.hidden = !modes.includes(x.dataset.m); x.setAttribute("aria-pressed", x.dataset.m === mode); });
   document.getElementById("d-mode").hidden = modes.length < 2;
   const years = periodYears();
@@ -523,7 +534,7 @@ function renderFordeling() {
   const fmtV = mode === "share" ? v => PF.format(v) : mode === "pop" ? v => NF.format(Math.round(v * 10) / 10) : v => NF.format(v);
   barList(el, items, { fmt: fmtV, tipFmt: i => `<b>${esc(i.label)}</b><br>${NF.format(i.n)} hendelser${state.cls !== "*" ? ` av ${NF.format(i.t)} totalt (${PF.format(i.t ? i.n / i.t : 0)})` : ""}${i.pop ? `<br>${NF.format(Math.round(i.n / years / i.pop * 10000) / 10)} per 1 000 innbyggere per år` : ""}${i.dim && !L.none(i.k) ? "<br><i>Lite grunnlag – under 10 hendelser</i>" : ""}${L.geo(i.k) ? "<br><i>Klikk for å velge</i>" : ""}`, onClick: i => { const g = L.geo(i.k); if (g) setState({ geo: g }); } });
   const unplaced = items.find(i => L.none(i.k)), total = items.reduce((a, i) => a + i.n, 0);
-  document.getElementById("f-note").textContent = [L.note, unplaced && total ? `${NF.format(unplaced.n)} hendelser (${PF.format(unplaced.n / total)}) er uten bydel.` : "", mode === "pop" ? `Per innbygger: hendelser per år delt på folketall (SSB ${D.populationYear}). Snittet for hele landet er ${NF.format(Math.round(nationalRate() * 10) / 10)}. Kommuner med mange besøkende, som byer med uteliv, får høye tall.` : "", items.some(i => i.dim && !L.none(i.k)) ? "Lysere søyler bygger på under 10 hendelser og er usikre." : ""].filter(Boolean).join(" ");
+  document.getElementById("f-note").textContent = [L.note, unplaced && total ? `${NF.format(unplaced.n)} hendelser (${PF.format(unplaced.n / total)}) er ${/^(Steder|Områder)/.test(L.title) ? "uten oppgitt sted" : "uten bydel"}.` : "", mode === "pop" ? `Per innbygger: hendelser per år delt på folketall (SSB ${D.populationYear}). Snittet for hele landet er ${NF.format(Math.round(nationalRate() * 10) / 10)}. Kommuner med mange besøkende, som byer med uteliv, får høye tall.` : "", items.some(i => i.dim && !L.none(i.k)) ? "Lysere søyler bygger på under 10 hendelser og er usikre." : ""].filter(Boolean).join(" ");
   const mult = document.getElementById("mults");
   const top12 = items.filter(i => !L.none(i.k)).slice(0, 12);
   mult.innerHTML = top12.map(i => `<div class="mult"><div class="t"><span>${esc(i.label)}</span><b>${NF.format(i.n)}</b></div><div class="chart" data-k="${i.k}"></div></div>`).join("") || `<p class="note">Ingen treff i utvalget.</p>`;
@@ -576,15 +587,15 @@ function renderAreas() {
   const tops = [...ar.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25);
   document.getElementById("a-top-lede").textContent = `${tname(state.cls)}, ${ctx()}.`;
   const max = Math.max(1, ...tops.map(t => t[1])), tEl = document.getElementById("a-top");
-  tEl.innerHTML = tops.length ? `<table><thead><tr><th>Sted</th><th class="hide-sm">Type</th>${showMuni ? '<th class="hide-sm">Kommune</th>' : g.hasBydel ? '<th class="hide-sm">Bydel</th>' : ""}<th class="r">Hendelser</th><th class="hide-sm"></th>${state.cls !== "*" ? '<th class="r">Andel av stedets hendelser</th>' : ""}</tr></thead><tbody>${tops.map(([a, v]) => { const A = area(a), all = arAll.get(a); return `<tr class="drill" tabindex="0" data-name="${esc(A[0])}" data-tip="${esc(`<b>${A[0]}</b><br>${NF.format(v)} av ${NF.format(all)} hendelser på stedet<br><i>Klikk for å lese hendelsene</i>`)}"><td>${esc(areaLabel(A))}</td><td class="hide-sm"><span class="atype">${esc(ATYPE_NAME[A[1]] || A[1])}</span></td>${showMuni ? `<td class="hide-sm">${esc(muniName(A[5]))}</td>` : g.hasBydel ? `<td class="hide-sm">${esc(A[2] || "–")}</td>` : ""}<td class="n">${NF.format(v)}</td><td class="bar-cell hide-sm"><span style="width:${(v / max * 100).toFixed(1)}%"></span></td>${state.cls !== "*" ? `<td class="n">${PF.format(all ? v / all : 0)}</td>` : ""}</tr>`; }).join("")}</tbody></table>` : `<p class="note">Ingen treff i utvalget.</p>`;
+  tEl.innerHTML = tops.length ? `<table><thead><tr><th>Sted</th><th class="hide-sm">Type</th>${showMuni ? '<th class="hide-sm">Kommune</th>' : g.hasBydel ? '<th class="hide-sm">Bydel</th>' : ""}<th class="r">Hendelser</th><th class="hide-sm"></th>${state.cls !== "*" ? '<th class="r">Andel av stedets hendelser</th>' : ""}</tr></thead><tbody>${tops.map(([a, v]) => { const A = area(a), all = arAll.get(a); return `<tr class="drill" tabindex="0" data-a="${a}" data-tip="${esc(`<b>${A[0]}</b><br>${NF.format(v)} av ${NF.format(all)} hendelser på stedet<br><i>Klikk for å lese hendelsene på stedet</i>`)}"><td>${esc(areaLabel(A))}</td><td class="hide-sm"><span class="atype">${esc(ATYPE_NAME[A[1]] || A[1])}</span></td>${showMuni ? `<td class="hide-sm">${esc(muniName(A[5]))}</td>` : g.hasBydel ? `<td class="hide-sm">${esc(A[2] || "–")}</td>` : ""}<td class="n">${NF.format(v)}</td><td class="bar-cell hide-sm"><span style="width:${(v / max * 100).toFixed(1)}%"></span></td>${state.cls !== "*" ? `<td class="n">${PF.format(all ? v / all : 0)}</td>` : ""}</tr>`; }).join("")}</tbody></table>` : `<p class="note">Ingen treff i utvalget.</p>`;
   bindTips(tEl);
-  tEl.querySelectorAll("tr.drill").forEach(tr => { const go = () => openFeed(tr.dataset.name); tr.addEventListener("click", go); tr.addEventListener("keydown", e => { if (e.key === "Enter") go(); }); });
+  tEl.querySelectorAll("tr.drill").forEach(tr => { const go = () => openFeed(`a:${tr.dataset.a}`); tr.addEventListener("click", go); tr.addEventListener("keydown", e => { if (e.key === "Enter") go(); }); });
 }
-// Åpner hendelseslisten med søk på et stedsnavn
-function openFeed(q) {
-  document.getElementById("feed-q").value = q === "Sentrum" ? "" : q;
+// Velger et sted og åpner hendelseslisten for det
+function openFeed(geo) {
+  document.getElementById("feed-q").value = "";
   state.tab = "hendelser"; try { history.replaceState(null, "", "#hendelser"); } catch {}
-  render(); scrollTo({ top: 0 });
+  setState({ geo }); scrollTo({ top: 0 });
 }
 function renderVariants() {
   const g = geoInfo(), vEl = document.getElementById("a-variants"), mid = g.id && D.variants[g.id] ? g.id : "0301";
@@ -663,7 +674,7 @@ function renderTree() {
 // ---------- Hendelser ----------
 function renderFeed() {
   const g = geoInfo(), c = state.cls;
-  const inGeo = s => g.kind === "all" || (g.kind === "d" && s.d === g.i) || (g.kind === "m" && s.k === g.k) || (g.kind === "b" && s.b === g.b);
+  const inGeo = s => g.kind === "all" || (g.kind === "d" && s.d === g.i) || (g.kind === "m" && s.k === g.k) || (g.kind === "b" && s.b === g.b) || (g.kind === "a" && s.a === g.a);
   const inCls = s => c === "*" || s.classes.some(x => x === c || topOf(x) === c);
   const qEl = document.getElementById("feed-q"), q = (qEl.value || "").trim().toLowerCase();
   const inText = s => !q || `${s.text} ${s.update || ""} ${s.area || ""} ${s.municipality} ${s.category}`.toLowerCase().includes(q);
@@ -678,25 +689,68 @@ function renderFeed() {
 }
 
 // ---------- Kart ----------
-let lmap, heat, landLayer, cityLayer, hoverLayer, labelLayer, dotLayer, bydelLayer, lastFitKey = null, mapPts = [];
-// Bydelsetiketter: midtpunkt (median) av de geokodede områdene i hver bydel
+let lmap, heat, hoverLayer, labelLayer, dotLayer, bydelLayer, bydelPoly, selLayer, landLayer, cityLayer, tileLayer, lastFitKey = null, mapPts = [];
+const BM = D.basemap || { tiles: {}, cities: [] };
+const isDark = () => { const t = document.documentElement.dataset.theme; return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
+// Bakgrunnskart: Kartverkets grå topografiske fliser, innebygd som WebP for de største byene
+const tileImgCache = new Map();
+const tileImage = key => {
+  const b64 = BM.tiles[key]; if (!b64) return Promise.resolve(null);
+  let p = tileImgCache.get(key);
+  if (!p) { p = new Promise(res => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = "data:image/webp;base64," + b64; }); tileImgCache.set(key, p); }
+  return p;
+};
+// Mangler en flis på dette zoomnivået, brukes riktig utsnitt av en flis på lavere nivå (forstørret), så kartet aldri får hull
+const BaseTiles = L.GridLayer.extend({
+  createTile(coords, done) {
+    const c = document.createElement("canvas"); c.width = c.height = 256;
+    (async () => {
+      for (let d = 0; d <= 3 && coords.z - d >= 11; d++) {
+        const im = await tileImage(`${coords.z - d}/${coords.x >> d}/${coords.y >> d}`);
+        if (!im) continue;
+        const size = 256 / (1 << d), sx = (coords.x & ((1 << d) - 1)) * size, sy = (coords.y & ((1 << d) - 1)) * size;
+        const ctx = c.getContext("2d"); ctx.imageSmoothingQuality = "high"; ctx.drawImage(im, sx * im.naturalWidth / 256, sy * im.naturalHeight / 256, size * im.naturalWidth / 256, size * im.naturalHeight / 256, 0, 0, 256, 256);
+        break;
+      }
+      done(null, c);
+    })();
+    return c;
+  },
+});
+// Bydelsgrenser (OSM) og etikettpunkt: midtpunkt av polygonet, eller median av stedene der grensen mangler
+const polyCentroid = ring => { let a = 0, cx = 0, cy = 0; for (let i = 0; i < ring.length - 1; i++) { const [x1, y1] = ring[i], [x2, y2] = ring[i + 1], f = x1 * y2 - x2 * y1; a += f; cx += (x1 + x2) * f; cy += (y1 + y2) * f; } a *= 3; return a ? [cx / a, cy / a] : ring[0]; };
 const BYDEL_LABELS = (() => {
-  const acc = {}; for (const A of D.areas) if (A[2] && A[3] != null) { const k = `${A[5]}|${A[2]}`; (acc[k] ??= { name: A[2], lat: [], lon: [] }); acc[k].lat.push(A[3]); acc[k].lon.push(A[4]); }
+  const out = [], seen = new Set(), geo = D.bydelGeo || {};
+  for (const [mid, byName] of Object.entries(geo)) for (const [name, rings] of Object.entries(byName)) {
+    const big = rings.slice().sort((x, y) => y.length - x.length)[0], [lon, lat] = polyCentroid(big);
+    out.push({ mid, name, lat, lon }); seen.add(`${mid}|${name}`);
+  }
+  const acc = {};
+  for (const A of D.areas) if (A[2] && A[3] != null) { const mid = D.munis[A[5] - 1][0], k = `${mid}|${A[2]}`; if (seen.has(k)) continue; (acc[k] ??= { mid, name: A[2], lat: [], lon: [] }); acc[k].lat.push(A[3]); acc[k].lon.push(A[4]); }
   const med = a => a.sort((x, y) => x - y)[Math.floor(a.length / 2)];
-  return Object.values(acc).filter(b => b.lat.length >= 3).map(b => ({ name: b.name, lat: med(b.lat), lon: med(b.lon) }));
+  for (const b of Object.values(acc)) if (b.lat.length >= 3) out.push({ mid: b.mid, name: b.name, lat: med(b.lat), lon: med(b.lon) });
+  return out;
 })();
+// Hendelser som vises på kartet: valgt område, men for et enkeltsted hele kommunen så stedet kan ses i sammenheng
+function mapMask() {
+  const g = geoInfo();
+  if (g.kind !== "a") return geoMask();
+  const k = g.k, m = new Uint8Array(N); for (let r = 0; r < N; r++) m[r] = COL.muni[r] === k ? 1 : 0; return m;
+}
 function computeMapPts() {
-  const test = clsTest(), cnt = new Map(); let located = 0, total = 0;
-  scan(r => { if (!test(r)) return; total++; const a = COL.area[r]; if (a && area(a)[3] != null) { located++; cnt.set(a, (cnt.get(a) || 0) + 1); } });
+  const test = clsTest(), cnt = new Map(), byd = new Map(); let located = 0, total = 0;
+  scan(r => { if (!test(r)) return; total++; const a = COL.area[r]; if (a && area(a)[3] != null) { located++; cnt.set(a, (cnt.get(a) || 0) + 1); } const bd = COL.bydel[r]; if (bd) byd.set(bd, (byd.get(bd) || 0) + 1); }, periodInfo().from, periodInfo().to, mapMask());
   mapPts = [...cnt.entries()].map(([a, v]) => ({ a, v, p: area(a) }));
+  mapPts.bydCount = byd;
   return { located, total };
 }
 function geoBounds() {
-  const g = geoInfo();
-  if (g.kind === "all") return [[57.8, 4.5], [71.3, 31.5]];
+  const g = geoInfo(), NORGE = [[57.8, 4.5], [71.3, 31.5]];
+  if (g.kind === "all") return NORGE;
+  if (g.kind === "a") { const A = area(g.a); return A[3] != null ? [[A[3] - 0.012, A[4] - 0.02], [A[3] + 0.012, A[4] + 0.02]] : NORGE; }
   const mask = geoMask(), lats = [], lons = [];
   for (let r = 0; r < N; r++) if (mask[r]) { const a = COL.area[r]; if (a && area(a)[3] != null) { lats.push(area(a)[3]); lons.push(area(a)[4]); } }
-  if (!lats.length) return [[57.8, 4.5], [71.3, 31.5]];
+  if (!lats.length) return NORGE;
   lats.sort((x, y) => x - y); lons.sort((x, y) => x - y);
   const q = (arr, f) => arr[Math.min(arr.length - 1, Math.floor(arr.length * f))];
   // Utsnittet følger der hendelsene er (2.–98. persentil), ikke kommunegrensen – ellers blir f.eks. Oslo dominert av Marka.
@@ -704,10 +758,14 @@ function geoBounds() {
 }
 function initMap() {
   if (lmap) return;
-  lmap = L.map("map", { zoomSnap: 0.25, minZoom: 4, maxZoom: 16, preferCanvas: true });
-  lmap.attributionControl.setPrefix(false).addAttribution("Grenser og stedsnavn: Kartverket · Data: Politiet");
-  landLayer = L.layerGroup().addTo(lmap); cityLayer = L.layerGroup().addTo(lmap);
-  dotLayer = L.layerGroup().addTo(lmap); bydelLayer = L.layerGroup().addTo(lmap);
+  lmap = L.map("map", { zoomSnap: 0.25, zoomDelta: 0.5, minZoom: 4, maxZoom: 16, preferCanvas: true });
+  lmap.createPane("land").style.zIndex = 150;
+  const attr = ["Data: Politiet", "Grenser: Kartverket"]; if (BM.cities.length) attr.push("Kart: © Kartverket"); if (D.bydelGeo && Object.keys(D.bydelGeo).length) attr.push("Bydelsgrenser: © OpenStreetMap-bidragsytere");
+  lmap.attributionControl.setPrefix(false).addAttribution(attr.join(" · "));
+  landLayer = L.layerGroup().addTo(lmap);
+  tileLayer = new BaseTiles({ minZoom: 10, minNativeZoom: 11, maxNativeZoom: 14, maxZoom: 16, tileSize: 256, className: "basetiles", updateWhenZooming: false, keepBuffer: 1 }).addTo(lmap);
+  cityLayer = L.layerGroup().addTo(lmap); bydelPoly = L.layerGroup().addTo(lmap);
+  dotLayer = L.layerGroup().addTo(lmap); selLayer = L.layerGroup().addTo(lmap); bydelLayer = L.layerGroup().addTo(lmap);
   hoverLayer = L.layerGroup().addTo(lmap); labelLayer = L.layerGroup().addTo(lmap);
   lmap.on("moveend", () => { renderMapTop(); renderLabels(); });
   document.querySelectorAll("#m-kind button").forEach(b => b.addEventListener("click", () => setState({ mkind: b.dataset.k })));
@@ -718,74 +776,85 @@ function fitMap(force) {
   document.querySelectorAll("#m-views button").forEach(x => x.setAttribute("aria-pressed", x.dataset.v === state.mview));
   if (!force && key === lastFitKey) return;
   lastFitKey = key;
-  lmap.fitBounds(state.mview === "norge" ? [[57.8, 4.5], [71.3, 31.5]] : geoBounds(), { padding: [10, 10] });
+  lmap.fitBounds(state.mview === "norge" ? [[57.8, 4.5], [71.3, 31.5]] : geoBounds(), { padding: [10, 10], maxZoom: 15 });
 }
 function styleBase() {
-  landLayer.clearLayers(); cityLayer.clearLayers();
-  const land = cssv("--land"), border = cssv("--border");
-  for (const f of D.fylker) L.polygon(f.rings.map(r => r.map(([x, y]) => [y, x])), { color: border, weight: 1, fillColor: land, fillOpacity: 1, interactive: false }).addTo(landLayer);
-  for (const k of D.kommuner) L.polygon(k.rings.map(r => r.map(([x, y]) => [y, x])), { color: border, weight: k.id === geoInfo().id ? 2 : 1, dashArray: k.id === geoInfo().id ? null : "3 3", fill: false, interactive: false }).addTo(cityLayer);
+  landLayer.clearLayers(); cityLayer.clearLayers(); bydelPoly.clearLayers();
+  const land = cssv("--land"), border = cssv("--border"), g = geoInfo(), dark = isDark();
+  document.getElementById("map").classList.toggle("dark", dark);
+  for (const f of D.fylker) L.polygon(f.rings.map(r => r.map(([x, y]) => [y, x])), { pane: "land", color: border, weight: 1, fillColor: land, fillOpacity: 1, interactive: false }).addTo(landLayer);
+  for (const k of D.kommuner) L.polygon(k.rings.map(r => r.map(([x, y]) => [y, x])), { color: dark ? "#8a98ab" : "#6b7a8f", weight: k.id === g.id ? 2.2 : 1, opacity: k.id === g.id ? 0.9 : 0.55, dashArray: k.id === g.id ? null : "4 4", fill: false, interactive: false }).addTo(cityLayer);
 }
 function renderMap() {
   initMap(); lmap.invalidateSize(); styleBase();
-  const cov = computeMapPts();
-  document.getElementById("m-title").textContent = `${tname(state.cls)} · ${geoInfo().label} · ${periodInfo().label}`;
+  const cov = computeMapPts(), g = geoInfo();
+  document.getElementById("m-title").textContent = `${tname(state.cls)} · ${g.label} · ${periodInfo().label}`;
   const vals = mapPts.map(p => p.v).sort((a, b) => a - b);
   const cap = vals.length ? Math.max(1, vals[Math.floor(vals.length * 0.97)]) : 1;
-  const ramp = RAMP(), gradient = { 0.15: ramp[2], 0.35: ramp[3], 0.55: ramp[4], 0.75: ramp[5], 0.9: ramp[6], 1: ramp[7] };
+  const ramp = RAMP(), gradient = { 0.2: ramp[3], 0.4: ramp[4], 0.6: ramp[5], 0.8: ramp[6], 1: ramp[7] };
   document.querySelectorAll("#m-kind button").forEach(x => x.setAttribute("aria-pressed", x.dataset.k === state.mkind));
   if (heat) { lmap.removeLayer(heat); heat = null; }
-  dotLayer.clearLayers();
+  dotLayer.clearLayers(); selLayer.clearLayers();
+  // Bydelsgrenser: tynne omriss med navn og klikk for å velge bydel
+  const byd = mapPts.bydCount || new Map();
+  for (const [mid, byName] of Object.entries(D.bydelGeo || {})) for (const [name, rings] of Object.entries(byName)) {
+    const bi = BYDEL_IDX[`${mid}|${name}`], sel = g.kind === "b" && g.b === bi;
+    const poly = L.polygon(rings.map(r => r.map(([x, y]) => [y, x])), { color: sel ? cssv("--accent") : (isDark() ? "#9aa8ba" : "#5d6b7e"), weight: sel ? 3 : 1.2, opacity: sel ? 1 : 0.7, fillColor: cssv("--accent"), fillOpacity: sel ? 0.06 : 0, dashArray: sel ? null : "2 3" }).addTo(bydelPoly);
+    poly.bindTooltip(`<b>${esc(name)}</b><br>${NF.format(byd.get(bi) || 0)} hendelser<br><i>Klikk for å velge bydel</i>`, { sticky: true, direction: "top" });
+    poly.on("click", () => setState({ geo: `b:${mid}|${name}` }));
+  }
   if (state.mkind === "dots") {
     const vmax = Math.max(1, ...mapPts.map(p => p.v)), surface = cssv("--surface"), col = cssv("--series");
     for (const p of mapPts.slice().sort((a, b) => b.v - a.v))
-      L.circleMarker([p.p[3], p.p[4]], { radius: 3 + 17 * Math.sqrt(p.v / vmax), color: surface, weight: 1, fillColor: col, fillOpacity: 0.55, interactive: false }).addTo(dotLayer);
+      L.circleMarker([p.p[3], p.p[4]], { radius: 3 + 17 * Math.sqrt(p.v / vmax), color: surface, weight: 1, fillColor: col, fillOpacity: 0.6, interactive: false }).addTo(dotLayer);
   } else {
-    heat = L.heatLayer(mapPts.map(p => [p.p[3], p.p[4], Math.min(1, p.v / cap)]), { radius: 20, blur: 15, maxZoom: 11, max: 1, minOpacity: 0.35, gradient }).addTo(lmap);
+    heat = L.heatLayer(mapPts.map(p => [p.p[3], p.p[4], Math.min(1, p.v / cap)]), { radius: 24, blur: 18, maxZoom: 11, max: 1, minOpacity: 0.38, gradient }).addTo(lmap);
   }
+  if (g.kind === "a" && area(g.a)[3] != null) { const A = area(g.a); L.circleMarker([A[3], A[4]], { radius: 14, color: cssv("--accent"), weight: 3, fill: false, interactive: false }).addTo(selLayer); }
   hoverLayer.clearLayers();
   for (const p of mapPts.slice().sort((a, b) => b.v - a.v).slice(0, 800))
-    L.circleMarker([p.p[3], p.p[4]], { radius: 7, stroke: false, fillOpacity: 0 })
-      .bindTooltip(`<b>${esc(areaLabel(p.p))}</b><br>${esc(muniName(p.p[5]))}${p.p[2] ? ` · ${esc(p.p[2])}` : ""}<br>${NF.format(p.v)} hendelser`, { direction: "top" })
-      .on("click", () => lmap.setView([p.p[3], p.p[4]], Math.max(lmap.getZoom(), 13))).addTo(hoverLayer);
-  document.getElementById("m-legend").innerHTML = state.mkind === "dots" ? `<span>Sirkelens areal viser antall hendelser per område (størst: ${NF.format(Math.max(0, ...mapPts.map(p => p.v)))}).</span>` : `<span>Få</span><span class="ramp">${ramp.slice(2).map(c => `<i style="background:${c}"></i>`).join("")}</span><span>Flere hendelser (mørkest: ${NF.format(cap)} eller flere på samme sted)</span>`;
-  document.getElementById("m-note").textContent = `${cov.total ? PF.format(cov.located / cov.total) : "0 %"} av hendelsene i utvalget har et område som er slått opp i Kartverket (${NF.format(cov.located)} av ${NF.format(cov.total)}). Veier, tunneler og hendelser uten oppgitt sted vises ikke. Tallene i listen gjelder derfor bare stedfestede hendelser.`;
+    L.circleMarker([p.p[3], p.p[4]], { radius: 8, stroke: false, fillOpacity: 0 })
+      .bindTooltip(`<b>${esc(areaLabel(p.p))}</b><br>${esc(muniName(p.p[5]))}${p.p[2] ? ` · ${esc(p.p[2])}` : ""}<br>${NF.format(p.v)} hendelser<br><i>Klikk for å velge stedet</i>`, { direction: "top" })
+      .on("click", () => setState({ geo: `a:${p.a}` })).addTo(hoverLayer);
+  document.getElementById("m-legend").innerHTML = state.mkind === "dots" ? `<span>Sirkelens areal viser antall hendelser per sted (størst: ${NF.format(Math.max(0, ...mapPts.map(p => p.v)))}).</span>` : `<span>Få</span><span class="ramp">${ramp.slice(2).map(c => `<i style="background:${c}"></i>`).join("")}</span><span>Flere hendelser (mørkest: ${NF.format(cap)} eller flere på samme sted)</span>`;
+  document.getElementById("m-note").textContent = `${cov.total ? PF.format(cov.located / cov.total) : "0 %"} av hendelsene${g.kind === "a" ? " i kommunen" : " i utvalget"} har et sted som er slått opp i Kartverket (${NF.format(cov.located)} av ${NF.format(cov.total)}). Veier, tunneler og hendelser uten oppgitt sted vises ikke. ${BM.cities.length ? "Bakgrunnskart finnes for de største byene; zoom inn for detaljer." : ""} Klikk et sted eller en bydel for å velge det.`;
   setTimeout(() => { lmap.invalidateSize(); fitMap(false); renderMapTop(); renderLabels(); }, 0);
 }
 function inView() { const b = lmap.getBounds(); return mapPts.filter(p => b.contains([p.p[3], p.p[4]])).sort((a, b) => b.v - a.v); }
 function renderMapTop() {
   if (!lmap || state.tab !== "kart") return;
   const pts = inView(), total = pts.reduce((s, p) => s + p.v, 0);
-  document.getElementById("m-top-lede").textContent = `${NF.format(total)} hendelser fordelt på ${NF.format(pts.length)} områder i utsnittet.`;
-  const items = pts.slice(0, 12).map(p => ({ label: `${areaLabel(p.p)}${geoInfo().kind === "all" || geoInfo().kind === "d" ? `, ${muniName(p.p[5])}` : ""}`, v: p.v, p }));
+  document.getElementById("m-top-lede").textContent = `${NF.format(total)} hendelser fordelt på ${NF.format(pts.length)} steder i kartutsnittet.`;
+  const g = geoInfo(), items = pts.slice(0, 12).map(p => ({ label: `${areaLabel(p.p)}${g.kind === "all" || g.kind === "d" ? `, ${muniName(p.p[5])}` : ""}`, v: p.v, p, sel: g.kind === "a" && g.a === p.a }));
   barList(document.getElementById("m-top"), items, {
-    tipFmt: i => `<b>${esc(i.p.p[0])}</b><br>${esc(muniName(i.p.p[5]))}${i.p.p[2] ? ` · ${esc(i.p.p[2])}` : ""}<br>${NF.format(i.v)} hendelser · ${PF.format(total ? i.v / total : 0)} av utsnittet`,
-    onClick: i => lmap.setView([i.p.p[3], i.p.p[4]], Math.max(lmap.getZoom() + 2, 13)),
+    tipFmt: i => `<b>${esc(i.p.p[0])}</b><br>${esc(muniName(i.p.p[5]))}${i.p.p[2] ? ` · ${esc(i.p.p[2])}` : ""}<br>${NF.format(i.v)} hendelser · ${PF.format(total ? i.v / total : 0)} av utsnittet<br><i>Klikk for å velge stedet</i>`,
+    onClick: i => setState({ geo: `a:${i.p.a}` }),
   });
 }
 function renderLabels() {
   if (!lmap) return;
   labelLayer.clearLayers(); bydelLayer.clearLayers();
   const z = lmap.getZoom(), b = lmap.getBounds();
-  // Hopp over etiketter som ville overlappet en som allerede er plassert (bydeler først, så steder)
+  // Hopp over etiketter som ville overlappet en som allerede er plassert: først de mest omtalte stedene, så bydelene, så resten
   const placed = [];
-  const fits = (x, y, w) => !placed.some(q => Math.abs(q.x - x) < (q.w + w) / 2 && Math.abs(q.y - y) < 16);
-  if (z >= 10 && z < 13.5) {
-    for (const bl of BYDEL_LABELS) {
-      if (!b.contains([bl.lat, bl.lon])) continue;
-      const pt = lmap.latLngToContainerPoint([bl.lat, bl.lon]), w = bl.name.length * 8 + 12;
-      if (!fits(pt.x, pt.y, w)) continue;
-      placed.push({ x: pt.x, y: pt.y, w });
-      L.tooltip({ permanent: true, direction: "center", className: "bydel", interactive: false }).setLatLng([bl.lat, bl.lon]).setContent(esc(bl.name)).addTo(bydelLayer);
-    }
+  const fits = (x, y, w) => !placed.some(q => Math.abs(q.x - x) < (q.w + w) / 2 && Math.abs(q.y - y) < 12);
+  const showPlace = p => {
+    const pt = lmap.latLngToContainerPoint([p.p[3], p.p[4]]), w = `${p.p[0]} ${NF.format(p.v)}`.length * 6.6 + 10;
+    const cands = [["right", pt.x + 6 + w / 2, pt.y, [6, 0]], ["left", pt.x - 6 - w / 2, pt.y, [-6, 0]], ["top", pt.x, pt.y - 14, [0, -8]], ["bottom", pt.x, pt.y + 14, [0, 8]]];
+    const c = cands.find(([, cx, cy]) => fits(cx, cy, w)); if (!c) return;
+    placed.push({ x: c[1], y: c[2], w });
+    L.tooltip({ permanent: true, direction: c[0], className: "place", offset: c[3] }).setLatLng([p.p[3], p.p[4]]).setContent(`${esc(p.p[0])} <b>${NF.format(p.v)}</b>`).addTo(labelLayer);
+  };
+  const near = z >= 11 ? inView().slice(0, 18) : [];
+  near.slice(0, 5).forEach(showPlace);
+  if (z >= 10 && z < 14) for (const bl of BYDEL_LABELS) {
+    if (!b.contains([bl.lat, bl.lon])) continue;
+    const pt = lmap.latLngToContainerPoint([bl.lat, bl.lon]), w = bl.name.length * 8 + 12;
+    if (!fits(pt.x, pt.y, w)) continue;
+    placed.push({ x: pt.x, y: pt.y, w });
+    L.tooltip({ permanent: true, direction: "center", className: "bydel", interactive: false }).setLatLng([bl.lat, bl.lon]).setContent(esc(bl.name)).addTo(bydelLayer);
   }
-  if (z < 11) return;
-  for (const p of inView().slice(0, 14)) {
-    const pt = lmap.latLngToContainerPoint([p.p[3], p.p[4]]), w = p.p[0].length * 6.5 + 8, cx = pt.x + 6 + w / 2;
-    if (!fits(cx, pt.y, w)) continue;
-    placed.push({ x: cx, y: pt.y, w });
-    L.tooltip({ permanent: true, direction: "right", className: "place", offset: [6, 0] }).setLatLng([p.p[3], p.p[4]]).setContent(esc(p.p[0])).addTo(labelLayer);
-  }
+  near.slice(5).forEach(showPlace);
 }
 
 // ---------- Datamodell ----------
@@ -824,6 +893,21 @@ function setupFilters() {
   document.querySelectorAll("#f-period button").forEach(b => b.addEventListener("click", () => setState({ period: b.dataset.p })));
   document.getElementById("f-reset").addEventListener("click", () => setState({ geo: "m:0301", cls: "*", period: "12m" }));
   document.querySelectorAll("#d-mode button").forEach(b => b.addEventListener("click", () => setState({ dmode: b.dataset.m })));
+  document.querySelectorAll("#f-level button").forEach(b => b.addEventListener("click", () => setState({ flevel: b.dataset.l })));
+  // Finn sted: søk i de ca. 3 000 mest brukte stedsnavnene
+  const places = new Map(), dl = document.getElementById("places");
+  D.areas.map((A, i) => ({ A, a: i + 1 })).filter(x => x.A[7] >= 5 && x.A[1] !== "vei").sort((x, y) => y.A[7] - x.A[7]).forEach(({ A, a }) => { const v = `${A[0]}, ${muniName(A[5])}`; if (!places.has(v)) places.set(v, a); });
+  dl.innerHTML = [...places.keys()].map(v => `<option value="${esc(v)}"></option>`).join("");
+  const fp = document.getElementById("f-place");
+  const pick = () => {
+    const v = fp.value.trim(); if (!v) return;
+    let a = places.get(v);
+    if (!a) { const lc = v.toLowerCase(), hit = [...places.keys()].find(k => k.toLowerCase().startsWith(lc)); if (hit) a = places.get(hit); }
+    fp.setCustomValidity(a ? "" : "Fant ikke stedet. Velg fra listen."); fp.reportValidity?.();
+    if (a) setState({ geo: `a:${a}` });
+  };
+  fp.addEventListener("change", pick);
+  fp.addEventListener("keydown", e => { if (e.key === "Enter") pick(); });
   document.getElementById("status").innerHTML = `<span class="chip"><span class="dot"></span>Oppdatert ${fmtDate(D.span[1])}</span>`;
   document.getElementById("foot-gen").textContent = `Databasen: ${NF.format(N)} hendelser fra ${fmtDate(D.span[0])} til ${fmtDate(D.span[1])}. Klassifisering ${D.classifier}, steder ${D.areaClassifier}.`;
 }
@@ -831,7 +915,7 @@ function setState(patch) {
   Object.assign(state, patch);
   if (state.cls !== "*" && !D.taxonomy[state.cls]) state.cls = "*";
   if (!PERIODS[state.period]) state.period = "12m";
-  const g = state.geo, ok = g === "all" || (g.startsWith("d:") && DIST_IDX[g.slice(2)] != null) || (g.startsWith("m:") && MUNI_IDX[g.slice(2)]) || (g.startsWith("b:") && BYDEL_IDX[g.slice(2)]);
+  const g = state.geo, ok = g === "all" || (g.startsWith("d:") && DIST_IDX[g.slice(2)] != null) || (g.startsWith("m:") && MUNI_IDX[g.slice(2)]) || (g.startsWith("b:") && BYDEL_IDX[g.slice(2)]) || (g.startsWith("a:") && D.areas[+g.slice(2) - 1] && D.areas[+g.slice(2) - 1][1] !== "vei");
   if (!ok) state.geo = "m:0301";
   save(); render();
 }
@@ -840,6 +924,7 @@ function render() {
   const sg = document.getElementById("f-geo");
   if (![...sg.options].some(o => o.value === state.geo)) sg.insertAdjacentHTML("beforeend", `<option value="${esc(state.geo)}">${esc(geoInfo().label)}</option>`);
   sg.value = state.geo;
+  document.getElementById("f-place").value = state.geo.startsWith("a:") ? geoInfo().label : "";
   document.getElementById("f-class").value = state.cls;
   document.querySelectorAll("#f-period button").forEach(b => b.setAttribute("aria-pressed", b.dataset.p === state.period));
   document.getElementById("filters").hidden = state.tab === "datamodell";

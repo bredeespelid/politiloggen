@@ -131,6 +131,8 @@ def main():
     ap.add_argument("--db", default="politiloggen.db")
     ap.add_argument("--out", default="app.json")
     ap.add_argument("--kommuner", type=int, default=24, help="Antall kommuner (etter volum) som får egne grenser")
+    ap.add_argument("--basemap", help="basemap.json fra build_basemap.py (innebygde kartfliser)")
+    ap.add_argument("--bydel-geo", default="prototype/data/bydeler.json", help="Bydelsgrenser fra fetch_bydel_geo.py")
     args = ap.parse_args()
     con = sqlite3.connect(args.db)
     q = lambda sql, *a: con.execute(sql, a).fetchall()
@@ -200,6 +202,10 @@ def main():
     for m in munis[:24]:
         sample_ids += [t for (t,) in q("""SELECT thread_id FROM incident WHERE municipality_id = ?
                                           ORDER BY created_on DESC LIMIT 80""", m[0])]
+    # De nyeste hendelsene for hvert av de 150 mest omtalte stedene, så et valgt sted (f.eks. Grønland) har innhold
+    for r in area_rows[:150]:
+        sample_ids += [t for (t,) in q("""SELECT thread_id FROM incident WHERE municipality_id = ? AND area_key = ?
+                                          ORDER BY created_on DESC LIMIT 12""", r[0], r[1])]
     samples = []
     for tid in dict.fromkeys(sample_ids):
         (cat, mid, did, akey, area, created, n, active, first, last), = q("""
@@ -213,7 +219,7 @@ def main():
                         "area": area, "created": created[:19] + "Z", "messages": n, "active": bool(active),
                         "text": clip(first), "update": clip(last) if n > 1 and last != first else None, "classes": [c[0] for c in cl],
                         "weapon": cl[0][1], "outcome": cl[0][2], "persons": cl[0][3],
-                        "d": d_idx[did], "k": m_idx.get(mid, 0), "b": b_idx.get((mid, bydel_of.get((mid, akey))), 0)})
+                        "d": d_idx[did], "k": m_idx.get(mid, 0), "b": b_idx.get((mid, bydel_of.get((mid, akey))), 0), "a": a_idx.get((mid, akey), 0)})
     samples.sort(key=lambda s: s["created"], reverse=True)
 
     # Eksempler på vask: per stor kommune, nøkler med flest ulike skrivemåter.
@@ -250,12 +256,20 @@ def main():
         "categories": category_names, "areaTypes": AREA_TYPES, "outcomes": OUTCOMES, "ages": AGES,
         "weapons": weapons,
         "bydeler": [[m, b] for m, b in bydeler],
-        "areas": [[r[2], r[3], r[4], r[5] and round(r[5], 5), r[6] and round(r[6], 5), m_idx.get(r[0], 0), r[1]] for r in area_rows],
+        "areas": [[r[2], r[3], r[4], r[5] and round(r[5], 5), r[6] and round(r[6], 5), m_idx.get(r[0], 0), r[1], r[7]] for r in area_rows],
         "distinctAreas": {"raw": q("SELECT COUNT(DISTINCT area) FROM incident")[0][0], "keys": counts["dim_area"]},
         "samples": samples, "variants": variants, "counts": counts,
         "example": {k: [list(r) for r in v] for k, v in example.items()},
         "fylker": fylker, "kommuner": kommuner,
     }
+    if args.basemap:
+        with open(args.basemap, encoding="utf-8") as f:
+            out["basemap"] = json.load(f)
+    try:
+        with open(args.bydel_geo, encoding="utf-8") as f:
+            out["bydelGeo"] = json.load(f)
+    except FileNotFoundError:
+        out["bydelGeo"] = {}
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
     print(f"{len(rec):,} hendelser, {len(area_rows):,} områder, {len(samples):,} eksempler -> {args.out}")
