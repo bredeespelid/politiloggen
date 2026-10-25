@@ -4,3 +4,4 @@ dist/
 summary.json
 __pycache__/
 web/public/app.json
+.claude/worktrees/
