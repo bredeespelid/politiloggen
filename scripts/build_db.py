@@ -261,6 +261,9 @@ def classify(category: str, text: str):
     # ellers holdes vi innenfor den overklassen politiet har valgt.
     home = CATEGORY_TO_TOP.get(category, "annet")
     codes = [c for c in codes if SUB_TOP[c] in (home, "vold")]
+    # Øvelser (f.eks. PLIVO) beskriver ikke faktisk vold, selv om teksten nevner trusler og våpen
+    if re.search(r"\bøvelse", t):
+        codes = [c for c in codes if SUB_TOP[c] != "vold"]
     if not codes:
         codes = [home]
     weapon = next((w for w, p in WEAPONS if re.search(p, t)), None)

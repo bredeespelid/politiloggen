@@ -21,8 +21,10 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
 TILE_URL = "https://cache.kartverket.no/v1/wmts/1.0.0/topograatone/default/webmercator/{z}/{y}/{x}.png"
-# Zoomnivå -> (persentilbånd for hendelsene, maks antall fliser). Høye nivåer dekker bare kjernen der det er tettest.
-LEVELS = {10: (0.00, 1.00, 4), 11: (0.01, 0.99, 9), 12: (0.03, 0.97, 30), 13: (0.10, 0.90, 56), 14: (0.20, 0.80, 36)}
+# Zoomnivå -> maks antall fliser per by. Fliser velges etter hvor mange hendelser som ligger i dem (tettest først),
+# og alle overliggende fliser tas alltid med, slik at kartet aldri får hull når appen forstørrer en lavere flis.
+LEVELS = {10: 6, 11: 14, 12: 26, 13: 40, 14: 28}
+MIN_SHARE = 0.003  # en flis må ha minst 0,3 % av byens hendelser
 MAX_ZOOM = {"0301": 14, "4601": 14}  # Oslo og Bergen får høyest oppløsning; øvrige byer stopper på 13 (og 12 etter rang 5)
 
 
@@ -60,7 +62,7 @@ def main():
     ap.add_argument("--db", default="politiloggen.db")
     ap.add_argument("--out", default="basemap.json")
     ap.add_argument("--cities", type=int, default=8)
-    ap.add_argument("--quality", type=int, default=42)
+    ap.add_argument("--quality", type=int, default=38)
     args = ap.parse_args()
     con = sqlite3.connect(args.db)
 
@@ -73,32 +75,35 @@ def main():
         pts = con.execute("""
             SELECT g.lat, g.lon, COUNT(*) FROM incident i JOIN geo_area g USING (municipality_id, area_key)
             WHERE i.municipality_id = ? AND g.lat IS NOT NULL GROUP BY 1, 2""", (mid,)).fetchall()
-        lats = [p[0] for p in pts for _ in range(min(p[2], 20))]
-        lons = [p[1] for p in pts for _ in range(min(p[2], 20))]
-        if len(lats) < 30:
+        total = sum(p[2] for p in pts)
+        if total < 30:
             continue
-        zooms, bounds = [], None
-        for z, (lo, hi, cap) in LEVELS.items():
-            if z > MAX_ZOOM.get(mid, 13 if rank < 5 else 12):
+        top_zoom = MAX_ZOOM.get(mid, 13 if rank < 5 else 12)
+        chosen = {}
+        for z, cap in LEVELS.items():
+            if z > top_zoom:
                 continue
-            s_, n_ = percentile(lats, lo), percentile(lats, min(hi, .999))
-            w_, e_ = percentile(lons, lo), percentile(lons, min(hi, .999))
-            pad_lat, pad_lon = (n_ - s_) * .10 + .003, (e_ - w_) * .10 + .004
-            s_, n_, w_, e_ = s_ - pad_lat, n_ + pad_lat, w_ - pad_lon, e_ + pad_lon
-            x0, y1 = tile_xy(s_, w_, z)
-            x1, y0 = tile_xy(n_, e_, z)
-            keys = [(z, x, y) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)]
-            if len(keys) <= cap:
-                zooms.append(z)
-                for k in keys:
-                    wanted.setdefault(k, name)
-                if bounds is None or z == 11:
-                    bounds = (s_, w_, n_, e_)
-        s, w, n, e = bounds if bounds else (0, 0, 0, 0)
-        if not zooms:
-            continue
-        meta.append({"id": mid, "name": name, "bounds": [round(s, 4), round(w, 4), round(n, 4), round(e, 4)], "zooms": zooms})
-        print(f"{name}: zoom {zooms}, utsnitt {s:.3f},{w:.3f} – {n:.3f},{e:.3f}")
+            counts = {}
+            for lat, lon, n in pts:
+                k = tile_xy(lat, lon, z)
+                counts[k] = counts.get(k, 0) + n
+            best = sorted(counts.items(), key=lambda kv: -kv[1])[:cap]
+            for (x, y), n in best:
+                if n / total >= MIN_SHARE:
+                    chosen[(z, x, y)] = True
+        # Overliggende fliser ned til zoom 10 (forstørres når en finere flis mangler)
+        for (z, x, y) in list(chosen):
+            for d in range(1, z - 9):
+                chosen[(z - d, x >> d, y >> d)] = True
+        zooms = sorted({z for z, _, _ in chosen})
+        for k in chosen:
+            wanted.setdefault(k, name)
+        lats = sorted(p[0] for p in pts for _ in range(min(p[2], 20)))
+        lons = sorted(p[1] for p in pts for _ in range(min(p[2], 20)))
+        s_, n_ = lats[int(len(lats) * .03)], lats[int(len(lats) * .97)]
+        w_, e_ = lons[int(len(lons) * .03)], lons[int(len(lons) * .97)]
+        meta.append({"id": mid, "name": name, "bounds": [round(s_, 4), round(w_, 4), round(n_, 4), round(e_, 4)], "zooms": zooms})
+        print(f"{name}: zoom {zooms}, {sum(1 for k in chosen)} fliser")
 
     print(f"Henter {len(wanted)} fliser …")
     with ThreadPoolExecutor(8) as pool:
