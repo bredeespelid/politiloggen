@@ -60,10 +60,18 @@ export function makeFixture(recs: Rec[] = RECS): AppData {
     weapons: ["kniv", "skytevåpen"],
     bydeler: [["0301", "Frogner"], ["0301", "Sagene"]],
     areas: [
-      ["Sentrum", "sentrum", "Frogner", 59.91, 10.73, 1, "sentrum"],
-      ["Storgata", "gate", "Sagene", 59.92, 10.75, 1, "storgata"],
-      ["Fana", "strøk", null, null, null, 2, "fana"],
+      ["Sentrum", "sentrum", "Frogner", 59.91, 10.73, 1, "sentrum", 6],
+      ["Storgata", "gate", "Sagene", 59.92, 10.75, 1, "storgata", 5],
+      ["Fana", "strøk", null, null, null, 2, "fana", 2],
+      ["E6", "vei", null, 59.8, 10.8, 1, "e6", 9],
     ],
+    bydelGeo: {
+      "0301": {
+        // kvadrat 0–2 i begge retninger: tyngdepunkt (1, 1)
+        Frogner: [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]],
+        // 3 punkter finnes ikke her, så Sagene faller tilbake til medianen av stedene
+      },
+    },
     distinctAreas: { raw: 5, keys: 3 },
     samples: [],
     variants: {},

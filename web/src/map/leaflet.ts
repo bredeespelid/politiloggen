@@ -11,4 +11,7 @@ export default L;
 
 /** Kartverkets gråtonekart (WMTS-cache, Web Mercator). Rekkefølgen er {z}/{y}/{x}. */
 export const TILE_URL = "https://cache.kartverket.no/v1/wmts/1.0.0/topograatone/default/webmercator/{z}/{y}/{x}.png";
-export const TILE_ATTRIBUTION = '© <a href="https://www.kartverket.no/" target="_blank" rel="noopener">Kartverket</a> (kart, grenser og stedsnavn)';
+
+/** Kildelinje nederst i kartet. Bydelsgrensene (OSM) nevnes bare når de er med i datafilen. */
+export const mapAttribution = (withBydel: boolean): string =>
+  ["Data: Politiet", "Grenser: Kartverket", "Kart: © Kartverket", ...(withBydel ? ["Bydelsgrenser: © OpenStreetMap-bidragsytere"] : [])].join(" · ");

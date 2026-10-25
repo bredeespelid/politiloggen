@@ -229,12 +229,11 @@ td.wrap { white-space: normal; }
 @media (prefers-reduced-motion: no-preference) { .spinner { animation: spin .8s linear infinite; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Kartfliser fra Kartverket. Dempes i mørk modus (varmekartet ligger i et annet lag og påvirkes ikke). */
-.leaflet-tile-pane { opacity: .9; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .leaflet-tile-pane { opacity: 1; filter: invert(1) hue-rotate(180deg) brightness(.75) contrast(.9) saturate(.6); }
-}
-:root[data-theme="dark"] .leaflet-tile-pane { opacity: 1; filter: invert(1) hue-rotate(180deg) brightness(.75) contrast(.9) saturate(.6); }
+/* Kartfliser fra Kartverket dempes så varmekartet og grensene ligger i forgrunnen. */
+.leaflet-tile-pane { filter: grayscale(1) contrast(.62) brightness(1.18); }
+.map.dark .leaflet-tile-pane { filter: invert(1) grayscale(1) contrast(.6) brightness(.78); }
+.leaflet-heatmap-layer { pointer-events: none; }
+.leaflet-tooltip.place b { font-weight: 700; color: var(--accent); }
 .leaflet-control-attribution.leaflet-control { background: color-mix(in srgb, var(--surface) 85%, transparent); color: var(--ink-2); }
 .leaflet-control-attribution a { color: var(--link); }
 .leaflet-tooltip.place { color: var(--ink); text-shadow: 0 0 3px var(--surface), 0 0 3px var(--surface), 0 0 2px var(--surface); }
@@ -274,3 +273,15 @@ tr.drill:focus-visible { outline: 2px solid var(--accent); }
 .sw.dash { background: none; border-top: 2px dashed var(--muted); height: 0; width: 14px; vertical-align: 3px; border-radius: 0; }
 nav.tabs a.meta { margin-left: auto; }
 @media (max-width: 700px) { nav.tabs a.meta { margin-left: 0; } }
+
+/* Finn sted, nivåvalg og endringer */
+.place-search { width: 210px; }
+.place-search input { width: 100%; }
+.field-error { color: var(--flag); font: 600 12px var(--font-body); text-transform: none; letter-spacing: 0; }
+.search input[aria-invalid="true"] { border-color: var(--flag); }
+.chg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 700px) { .chg-grid { grid-template-columns: 1fr; } }
+.chg-grid h3 { font: 600 13px var(--font-body); margin: 0 0 6px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .06em; }
+.bar-fill.neg { background: var(--muted); }
+
+.panel > .seg { justify-self: start; max-width: 100%; }

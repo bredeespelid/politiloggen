@@ -77,7 +77,7 @@ function Dashboard({ ds }: { ds: Dataset }) {
   const geo = useMemo(() => geoInfo(ds, state.geo), [ds, state.geo]);
   const mask = useMemo(() => geoMask(ds, geo), [ds, geo]);
   const period = useMemo(() => periodInfo(state.period, ds.first, ds.last), [ds, state.period]);
-  const sel = useMemo(() => makeSelection(ds, geo, mask, state.cls, period), [ds, geo, mask, state.cls, period]);
+  const sel = useMemo(() => makeSelection(ds, geo, mask, state.cls, period, state.flevel), [ds, geo, mask, state.cls, period, state.flevel]);
 
   useEffect(() => tip.hide(), [tip, sel, state.tab, state.dmode]);
   useEffect(() => {

@@ -7,10 +7,13 @@ import {
 } from "../data/dataset";
 import type { AreaRow, Sample } from "../data/types";
 import { CAT_TO_TOP, WD, cap1 } from "./format";
-import { geoInfo, geoMask, geoPop, type GeoInfo } from "./geo";
+import { geoInfo, geoMask, geoPop, mapMask, type GeoInfo } from "./geo";
 import { periodDays, periodYears, shiftMonth, type PeriodInfo } from "./period";
 
 export type RowTest = (r: number) => boolean;
+
+/** Nivået under en kommune med bydeler i Fordeling: bydeler eller enkeltsteder. */
+export type FLevel = "bydel" | "sted";
 
 export interface Selection {
   ds: Dataset;
@@ -20,6 +23,7 @@ export interface Selection {
   cls: string;
   period: PeriodInfo;
   test: RowTest;
+  flevel: FLevel;
 }
 
 export function clsTest(ds: Dataset, c: string): RowTest {
@@ -34,13 +38,13 @@ export function clsTest(ds: Dataset, c: string): RowTest {
   return (r) => (T[r] & bit) !== 0;
 }
 
-export function makeSelection(ds: Dataset, geo: GeoInfo, mask: Uint8Array, cls: string, period: PeriodInfo): Selection {
-  return { ds, geo, mask, cls, period, test: clsTest(ds, cls) };
+export function makeSelection(ds: Dataset, geo: GeoInfo, mask: Uint8Array, cls: string, period: PeriodInfo, flevel: FLevel = "bydel"): Selection {
+  return { ds, geo, mask, cls, period, test: clsTest(ds, cls), flevel };
 }
 
 /** Går gjennom hendelsene i valgt område og månedsintervall (inkludert begge ender). */
-export function scan(sel: Selection, fn: (r: number) => void, from = sel.period.from, to = sel.period.to): void {
-  const { ds, mask } = sel;
+export function scan(sel: Selection, fn: (r: number) => void, from = sel.period.from, to = sel.period.to, mask = sel.mask): void {
+  const { ds } = sel;
   if (from > ds.last || to < ds.first) return;
   const a = monthIndex(ds, from), b = monthIndex(ds, to), M = ds.col.month;
   for (let r = 0; r < ds.n; r++) if (mask[r] && M[r] >= a && M[r] <= b) fn(r);
@@ -152,6 +156,8 @@ export interface BarItem {
   v: number;
   sel?: boolean;
   dim?: boolean;
+  /** tegnes grått (nedgang) */
+  neg?: boolean;
 }
 
 /** Overklasser (uten klassefilter), sortert synkende. */
@@ -251,9 +257,11 @@ export interface Level {
   pop?: (k: number) => number | null;
   limit: number;
   note?: string;
+  /** Nivået er steder (da heter samlebøtten «uten oppgitt sted», ellers «uten bydel»). */
+  places?: boolean;
 }
 
-export function childLevel(ds: Dataset, g: GeoInfo): Level {
+export function childLevel(ds: Dataset, g: GeoInfo, flevel: FLevel = "bydel"): Level {
   const { col, app } = ds;
   const base = { none: (k: number) => !k };
   if (g.kind === "all") {
@@ -269,7 +277,10 @@ export function childLevel(ds: Dataset, g: GeoInfo): Level {
       geo: (k) => (k ? `m:${app.munis[k - 1][0]}` : null), pop: (k) => (k ? app.munis[k - 1][4] ?? null : null), limit: 15,
     };
   }
-  if (g.kind === "m" && g.hasBydel) {
+  if (g.kind === "a") {
+    return { title: "Politiets kategorier på stedet", key: (r) => col.category[r], label: (k) => app.categories[k], geo: () => null, none: () => false, limit: 12 };
+  }
+  if (g.kind === "m" && g.hasBydel && flevel !== "sted") {
     return {
       ...base, title: `Bydeler i ${g.label}`, key: (r) => col.bydel[r], label: (k) => bydelLabel(ds, k),
       geo: (k) => (k ? `b:${app.bydeler[k - 1].join("|")}` : null), limit: 20,
@@ -277,8 +288,9 @@ export function childLevel(ds: Dataset, g: GeoInfo): Level {
     };
   }
   return {
-    ...base, title: `Områder i ${g.label}`, key: (r) => col.area[r], label: (k) => (k ? areaLabel(areaRow(ds, k)) : "Øvrige/ukjent"),
-    geo: () => null, limit: 15,
+    ...base, title: `Steder i ${g.label}`, key: (r) => col.area[r], label: (k) => (k ? areaLabel(areaRow(ds, k)) : "Uten oppgitt sted"),
+    geo: (k) => (k ? `a:${k}` : null), limit: 15, places: true,
+    note: "Steder er stedsnavnene politiet oppgir (strøk, gater, sentrum), vasket og samlet. Klikk et sted for å se bare det.",
   };
 }
 
@@ -311,7 +323,7 @@ export interface Distribution {
   months: string[];
   partialLast: boolean;
   years: number;
-  /** hendelser uten bydel osv., og summen av enhetene som vises */
+  /** hendelser uten bydel/sted, og summen av enhetene som vises */
   unplaced: number | null;
   total: number;
   hasLow: boolean;
@@ -319,7 +331,7 @@ export interface Distribution {
 
 export function distribution(sel: Selection, dmode: DistMode): Distribution {
   const { ds, geo, test, period: p } = sel;
-  const level = childLevel(ds, geo);
+  const level = childLevel(ds, geo, sel.flevel);
   // Per innbygger finnes bare for kommuner/distrikter; andel gir ikke mening for alle hendelser (alltid 100 %).
   const modes = ([level.pop ? "pop" : null, sel.cls !== "*" ? "share" : null, "abs"] as (DistMode | null)[]).filter((m): m is DistMode => m != null);
   const mode = modes.includes(dmode) ? dmode : modes[0];
@@ -467,7 +479,7 @@ export function insights(sel: Selection): string[] {
   const c = sel.cls, lab = tname(ds, c).toLowerCase(), nTops = ds.app.tops.length;
   const cur = new Array<number>(nTops).fill(0), prv = new Array<number>(nTops).fill(0);
   let n = 0, tot = 0, prev = 0, night = 0;
-  const grid = new Array<number>(168).fill(0), child = new Map<number, number>(), L = childLevel(ds, geo);
+  const grid = new Array<number>(168).fill(0), child = new Map<number, number>(), L = childLevel(ds, geo, sel.flevel), places = new Map<number, number>();
   const { col } = ds;
   scan(sel, (r) => {
     tot++;
@@ -479,6 +491,8 @@ export function insights(sel: Selection): string[] {
     if (h >= 22 || h < 6) night++;
     const k = L.key(r);
     if (!L.none(k)) child.set(k, (child.get(k) ?? 0) + 1);
+    const pa = col.area[r];
+    if (pa) places.set(pa, (places.get(pa) ?? 0) + 1);
   });
   if (p.prev) {
     scan(sel, (r) => {
@@ -521,7 +535,17 @@ export function insights(sel: Selection): string[] {
     else out.push(`${cap1(lab)} er **${pct(n / tot)}** av alle hendelser.`);
   }
   const best = [...child.entries()].sort((x, y) => y[1] - x[1])[0];
-  if (best && child.size > 1) out.push(`Flest i **${L.label(best[0])}**: ${f(best[1])} hendelser, ${pct(best[1] / n)} av ${what}.`);
+  if (best && child.size > 1) {
+    out.push(geo.kind === "a"
+      ? `Vanligste kategori hos politiet: **${L.label(best[0])}** (${f(best[1])} hendelser).`
+      : `Flest i **${L.label(best[0])}**: ${f(best[1])} hendelser, ${pct(best[1] / n)} av ${what}.`);
+  }
+  const topPlace = geo.kind === "a" ? null
+    : [...places.entries()].filter(([a]) => !["vei", "kommune", "sentrum"].includes(areaRow(ds, a)[1])).sort((x, y) => y[1] - x[1])[0];
+  if (topPlace) {
+    const A = areaRow(ds, topPlace[0]);
+    out.push(`Mest omtalte sted: **${A[0]}** (${f(topPlace[1])} hendelser${A[2] ? `, bydel ${A[2]}` : ""}).`);
+  }
   const perDay = WD.map((_, d) => grid.slice(d * 24, d * 24 + 24).reduce((s, v) => s + v, 0));
   const bd = perDay.indexOf(Math.max(...perDay));
   const blocks = Array.from({ length: 8 }, (_, k) => {
@@ -535,6 +559,57 @@ export function insights(sel: Selection): string[] {
   const hh = (h: number) => String(h).padStart(2, "0");
   out.push(`Mest aktivt på **${WD[bd].toLowerCase()}er** og mellom **kl. ${hh(bb * 3)} og ${hh(bb * 3 + 3)}**. ${pct(night / n)} skjer mellom kl. 22 og 06.`);
   return out;
+}
+
+// ---------- Hvor endrer det seg? ----------
+
+/** Færre hendelser enn dette i begge år gir for tilfeldige endringer. */
+export const MIN_CHANGE = 10;
+
+export interface ChangeItem extends BarItem {
+  k: number;
+  /** nå og året før */
+  c: number;
+  o: number;
+  d: number;
+  /** områdenøkkel for å velge enheten, eller null */
+  geo: string | null;
+}
+
+export interface ChangeStats {
+  /** Skjules for ett enkelt sted: for få hendelser. */
+  applicable: boolean;
+  /** Finnes det en sammenligningsperiode? */
+  hasPrev: boolean;
+  title: string;
+  ups: ChangeItem[];
+  downs: ChangeItem[];
+}
+
+/** Største endringer mot samme periode året før, på nivået under valgt område. */
+export function changeStats(sel: Selection, top = 5): ChangeStats {
+  const { ds, geo, period: p, test } = sel;
+  const L = childLevel(ds, geo, sel.flevel);
+  const title = `Hvor endrer det seg? ${L.title.replace(/^Per /, "per ")}`.trim();
+  if (geo.kind === "a") return { applicable: false, hasPrev: false, title, ups: [], downs: [] };
+  if (!p.prev) return { applicable: true, hasPrev: false, title, ups: [], downs: [] };
+  const cur = new Map<number, number>(), prv = new Map<number, number>();
+  const count = (m: Map<number, number>) => (r: number) => {
+    if (!test(r)) return;
+    const k = L.key(r);
+    if (!L.none(k)) m.set(k, (m.get(k) ?? 0) + 1);
+  };
+  scan(sel, count(cur));
+  scan(sel, count(prv), p.prev[0], p.prev[1]);
+  const rows: ChangeItem[] = [...new Set([...cur.keys(), ...prv.keys()])]
+    .map((k) => ({ key: k, k, label: L.label(k), c: cur.get(k) ?? 0, o: prv.get(k) ?? 0, d: 0, v: 0, geo: L.geo(k) }))
+    .filter((x) => Math.max(x.c, x.o) >= MIN_CHANGE)
+    .map((x) => ({ ...x, d: x.c - x.o }));
+  return {
+    applicable: true, hasPrev: true, title,
+    ups: rows.filter((x) => x.d > 0).sort((a, b) => b.d - a.d).slice(0, top).map((x) => ({ ...x, v: x.d })),
+    downs: rows.filter((x) => x.d < 0).sort((a, b) => a.d - b.d).slice(0, top).map((x) => ({ ...x, v: -x.d, neg: true })),
+  };
 }
 
 // ---------- Klassifisering ----------
@@ -587,9 +662,9 @@ export interface MapPoint {
   lon: number;
 }
 
-export function mapPoints(sel: Selection): { pts: MapPoint[]; located: number; total: number } {
+export function mapPoints(sel: Selection): { pts: MapPoint[]; located: number; total: number; byd: Map<number, number> } {
   const { ds, test } = sel;
-  const A = ds.col.area, cnt = new Map<number, number>();
+  const A = ds.col.area, B = ds.col.bydel, cnt = new Map<number, number>(), byd = new Map<number, number>();
   let located = 0, total = 0;
   scan(sel, (r) => {
     if (!test(r)) return;
@@ -599,12 +674,13 @@ export function mapPoints(sel: Selection): { pts: MapPoint[]; located: number; t
       located++;
       cnt.set(a, (cnt.get(a) ?? 0) + 1);
     }
-  });
+    if (B[r]) byd.set(B[r], (byd.get(B[r]) ?? 0) + 1);
+  }, sel.period.from, sel.period.to, mapMask(ds, sel.geo, sel.mask));
   const pts = [...cnt.entries()].map(([a, v]) => {
     const row = areaRow(ds, a);
     return { a, v, row, lat: row[3]!, lon: row[4]! };
   });
-  return { pts, located, total };
+  return { pts, located, total, byd };
 }
 
 export type LatLngBounds = [[number, number], [number, number]];
@@ -616,6 +692,10 @@ export const NORWAY: LatLngBounds = [[57.8, 4.5], [71.3, 31.5]];
  */
 export function geoBounds(ds: Dataset, geo: GeoInfo, mask: Uint8Array): LatLngBounds {
   if (geo.kind === "all") return NORWAY;
+  if (geo.kind === "a") {
+    const A = areaRow(ds, geo.a ?? 0);
+    return A[3] != null && A[4] != null ? [[A[3] - 0.012, A[4] - 0.02], [A[3] + 0.012, A[4] + 0.02]] : NORWAY;
+  }
   const lats: number[] = [], lons: number[] = [], A = ds.col.area;
   for (let r = 0; r < ds.n; r++) {
     if (!mask[r]) continue;
@@ -639,7 +719,7 @@ export function geoBounds(ds: Dataset, geo: GeoInfo, mask: Uint8Array): LatLngBo
 export function filterSamples(ds: Dataset, geo: GeoInfo, cls: string, query: string, period: PeriodInfo): Sample[] {
   const q = query.trim().toLowerCase();
   const inGeo = (s: Sample) =>
-    geo.kind === "all" || (geo.kind === "d" && s.d === geo.i) || (geo.kind === "m" && s.k === geo.k) || (geo.kind === "b" && s.b === geo.b);
+    geo.kind === "all" || (geo.kind === "d" && s.d === geo.i) || (geo.kind === "m" && s.k === geo.k) || (geo.kind === "b" && s.b === geo.b) || (geo.kind === "a" && s.a === geo.a);
   const inCls = (s: Sample) => cls === "*" || s.classes.some((x) => x === cls || topOf(ds, x) === cls);
   const inText = (s: Sample) => !q || `${s.text} ${s.update ?? ""} ${s.area ?? ""} ${s.municipality} ${s.category}`.toLowerCase().includes(q);
   const to = period.key === "12m" ? ds.last : period.to;

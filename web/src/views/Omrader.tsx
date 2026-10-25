@@ -27,9 +27,9 @@ export default function Omrader({ ds, sel, state, update }: ViewProps) {
   const showMuni = g.kind === "all" || g.kind === "d";
   const maxTop = Math.max(1, ...a.top.map((t) => t.v));
 
-  /** Leser hendelsene på et sted: åpner Hendelser med stedsnavnet som søk. */
-  const openFeed = (name: string) => {
-    update({ tab: "hendelser", q: name === "Sentrum" ? "" : name });
+  /** Velger stedet og åpner hendelseslisten for det. */
+  const openFeed = (area: number) => {
+    update({ geo: `a:${area}`, tab: "hendelser", q: "" });
     scrollTo({ top: 0 });
   };
 
@@ -72,10 +72,10 @@ export default function Omrader({ ds, sel, state, update }: ViewProps) {
               </thead>
               <tbody>
                 {a.top.map(({ a: id, row, v, all }) => {
-                  const h = tipHandlers(tipApi, () => <><b>{row[0]}</b><br />{fmtNum(v)} av {fmtNum(all)} hendelser på stedet<br /><i>Klikk for å lese hendelsene</i></>);
+                  const h = tipHandlers(tipApi, () => <><b>{row[0]}</b><br />{fmtNum(v)} av {fmtNum(all)} hendelser på stedet<br /><i>Klikk for å lese hendelsene på stedet</i></>);
                   return (
-                    <tr key={id} className="drill" tabIndex={0} onClick={() => openFeed(row[0])}
-                      onKeyDown={(e) => { if (e.key === "Enter") openFeed(row[0]); }}
+                    <tr key={id} className="drill" tabIndex={0} onClick={() => openFeed(id)}
+                      onKeyDown={(e) => { if (e.key === "Enter") openFeed(id); }}
                       onPointerMove={h.onPointerMove} onPointerLeave={h.onPointerLeave} onFocus={h.onFocus} onBlur={h.onBlur}>
                       <td>{areaLabel(row)}</td>
                       <td className="hide-sm"><span className="atype">{ATYPE_NAME[row[1]] ?? row[1]}</span></td>

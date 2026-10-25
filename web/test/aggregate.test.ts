@@ -168,8 +168,8 @@ describe("filterSamples", () => {
   const withSamples = buildDataset({
     ...makeFixture(),
     samples: [
-      { id: "a", category: "Trafikk", municipality: "Oslo", area: "Storgata", created: "2025-02-10T12:00:00Z", messages: 2, active: false, text: "Bil i grøfta", update: "Fjernet", classes: ["trafikk.rus"], weapon: null, outcome: [], persons: [], d: 0, k: 1, b: 2 },
-      { id: "b", category: "Voldshendelse", municipality: "Bergen", area: null, created: "2024-12-02T12:00:00Z", messages: 1, active: false, text: "Slagsmål", classes: ["vold"], weapon: null, outcome: [], persons: [], d: 1, k: 2, b: 0 },
+      { id: "a", category: "Trafikk", municipality: "Oslo", area: "Storgata", created: "2025-02-10T12:00:00Z", messages: 2, active: false, text: "Bil i grøfta", update: "Fjernet", classes: ["trafikk.rus"], weapon: null, outcome: [], persons: [], d: 0, k: 1, b: 2, a: 2 },
+      { id: "b", category: "Voldshendelse", municipality: "Bergen", area: null, created: "2024-12-02T12:00:00Z", messages: 1, active: false, text: "Slagsmål", classes: ["vold"], weapon: null, outcome: [], persons: [], d: 1, k: 2, b: 0, a: 0 },
     ],
   });
   const f = (geo: string, cls: string, q: string, period: PeriodKey) => {

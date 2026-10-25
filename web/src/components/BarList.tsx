@@ -30,7 +30,7 @@ export function BarList<T extends BarItem>({ items, label, fmt = fmtNum, tip, on
           <>
             <span className="name" title={i.label}>{i.label}</span>
             <span className="bar-track" aria-hidden="true">
-              <span className="bar-fill" style={{ width: `${((i.v / max) * 100).toFixed(1)}%` }} />
+              <span className={`bar-fill${i.neg ? " neg" : ""}`} style={{ width: `${((i.v / max) * 100).toFixed(1)}%` }} />
             </span>
             <span className="val">{fmt(i.v)}</span>
           </>

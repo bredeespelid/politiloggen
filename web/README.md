@@ -32,6 +32,11 @@ python3 scripts/build_db.py && python3 scripts/geocode.py && python3 scripts/bui
 - `build_app_data.py` pakker én rad per hendelse som base64-felt med fast bredde (`rec` og `recFields`),
   pluss oppslagstabeller, eksempler og fylkes- og kommunegrenser.
 
+Bydelsgrenser (OSM) leses fra `prototype/data/bydeler.json` (lages med `scripts/fetch_bydel_geo.py`) og
+havner i `bydelGeo`. Hvis de mangler, tegnes bare bydelsetiketter ut fra stedene. Kartfliser i
+`app.json` (`--basemap`, brukes av den frittstående prototypen) ignoreres av webappen, som henter
+kartfliser live fra Kartverket. La derfor være å bruke `--basemap` her: filen blir flere MB større.
+
 Hvis filen mangler, viser appen en feilmelding med kommandoen over.
 
 ## Lenker til et utvalg
@@ -42,9 +47,11 @@ Filtrene ligger i adressen, så et utvalg kan deles:
 /?geo=b:0301|Grünerløkka&cls=vold&p=2025#fordeling
 ```
 
-`geo` er `all`, `d:<distrikts-id>`, `m:<kommunenr>` eller `b:<kommunenr>|<bydel>`. `cls` er en
+`geo` er `all`, `d:<distrikts-id>`, `m:<kommunenr>`, `b:<kommunenr>|<bydel>` eller `a:<stedsindeks>`
+(ett sted, f.eks. `a:42` = Grønland; veier kan ikke velges). `cls` er en
 klassekode (`vold`, `vold.kniv`, …) eller `*`. `p` er `12m`, `2025`, `2024` eller `alle`.
-Valgfritt: `dm` (`pop`, `share`, `abs`), `mv` (`geo`, `norge`), `mk` (`heat`, `dots`) og `q` (søk i Hendelser).
+Valgfritt: `dm` (`pop`, `share`, `abs`), `fl` (`bydel`, `sted`: nivå i Fordeling), `mv` (`geo`, `norge`),
+`mk` (`heat`, `dots`) og `q` (søk i Hendelser).
 Ugyldige verdier byttes ut med standardvalget (Oslo, alle hendelser, siste 12 hele måneder).
 
 ## Kommandoer

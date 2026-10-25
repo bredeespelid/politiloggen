@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Dataset } from "../data/dataset";
-import { DIST_MODES, type DistMode } from "../lib/aggregate";
+import { DIST_MODES, type DistMode, type FLevel } from "../lib/aggregate";
 import { isValidGeo } from "../lib/geo";
 import { isPeriodKey, type PeriodKey } from "../lib/period";
 
@@ -28,13 +28,15 @@ export interface AppState {
   tab: Tab;
   mview: MapView;
   mkind: MapKind;
+  /** nivå i Fordeling for en kommune med bydeler: bydeler eller enkeltsteder */
+  flevel: FLevel;
   /** søk i hendelseslisten (ikke lagret i localStorage) */
   q: string;
 }
 
 export const STORE_KEY = "pl-state-v2";
 export const DEFAULT_GEO = "m:0301";
-export const DEFAULT_STATE: AppState = { geo: DEFAULT_GEO, cls: "*", period: "12m", dmode: "pop", tab: "oversikt", mview: "geo", mkind: "heat", q: "" };
+export const DEFAULT_STATE: AppState = { geo: DEFAULT_GEO, cls: "*", period: "12m", dmode: "pop", tab: "oversikt", mview: "geo", mkind: "heat", flevel: "bydel", q: "" };
 
 const isTab = (v: unknown): v is Tab => TABS.some((t) => t.id === v);
 
@@ -52,30 +54,32 @@ export function sanitize(ds: Dataset, s: Partial<AppState>): AppState {
     tab: isTab(s.tab) ? s.tab : DEFAULT_STATE.tab,
     mview: s.mview === "norge" ? "norge" : "geo",
     mkind: s.mkind === "dots" ? "dots" : "heat",
+    flevel: s.flevel === "sted" ? "sted" : "bydel",
     q: typeof s.q === "string" ? s.q.slice(0, 100) : "",
   };
 }
 
-/** Filtre i adressen: ?geo=m:0301&cls=vold&p=12m (dm, mv, mk og q er valgfrie). */
+/** Filtre i adressen: ?geo=m:0301&cls=vold&p=12m (dm, mv, mk, fl og q er valgfrie). */
 export function stateToQuery(s: AppState): string {
   const p = new URLSearchParams({ geo: s.geo, cls: s.cls, p: s.period });
   if (s.dmode !== DEFAULT_STATE.dmode) p.set("dm", s.dmode);
   if (s.mview !== DEFAULT_STATE.mview) p.set("mv", s.mview);
   if (s.mkind !== DEFAULT_STATE.mkind) p.set("mk", s.mkind);
+  if (s.flevel !== DEFAULT_STATE.flevel) p.set("fl", s.flevel);
   if (s.q) p.set("q", s.q);
   return p.toString();
 }
 
 export function queryToState(search: string): Partial<AppState> {
   const p = new URLSearchParams(search), out: Record<string, string> = {};
-  for (const [param, key] of [["geo", "geo"], ["cls", "cls"], ["p", "period"], ["dm", "dmode"], ["mv", "mview"], ["mk", "mkind"], ["q", "q"]] as const) {
+  for (const [param, key] of [["geo", "geo"], ["cls", "cls"], ["p", "period"], ["dm", "dmode"], ["mv", "mview"], ["mk", "mkind"], ["fl", "flevel"], ["q", "q"]] as const) {
     const v = p.get(param);
     if (v != null) out[key] = v;
   }
   return out as Partial<AppState>;
 }
 
-const PERSISTED = ["geo", "cls", "period", "dmode", "mview", "mkind"] as const;
+const PERSISTED = ["geo", "cls", "period", "dmode", "mview", "mkind", "flevel"] as const;
 
 function load(): Partial<AppState> {
   try {

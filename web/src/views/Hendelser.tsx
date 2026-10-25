@@ -39,7 +39,7 @@ export default function Hendelser({ ds, sel, state, update }: ViewProps) {
                   <div className="tags">
                     {s.classes.map((x) => <span key={x} className="tag c">{tname(ds, x)}</span>)}
                     {s.weapon && <span className="tag">våpen: {s.weapon}</span>}
-                    {s.outcome.map((o) => <span key={o} className="tag">{o}</span>)}
+                    {s.outcome.filter((o) => !s.classes.some((x) => tname(ds, x).toLowerCase() === o)).map((o) => <span key={o} className="tag">{o}</span>)}
                     {s.persons.map((pp, i) => <span key={i} className="tag p">{pp.kjønn} · {pp.alder}</span>)}
                   </div>
                 </article>

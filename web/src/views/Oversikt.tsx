@@ -5,7 +5,7 @@ import { PERSON_SERIES, PersonsChart } from "../components/PersonsChart";
 import { KpiRow, Panel, type KpiItem } from "../components/ui";
 import { childrenOf, tname, topOf } from "../data/dataset";
 import {
-  days, insights, kpiStats, monthlyTrend, nationalRate, outcomeStats, personStats, subClassItems, topClassItems, years,
+  MIN_CHANGE, changeStats, days, insights, kpiStats, monthlyTrend, nationalRate, outcomeStats, personStats, subClassItems, topClassItems, years,
 } from "../lib/aggregate";
 import { OUT_LABEL, fmt1, fmtNum, fmtPct, mlabel } from "../lib/format";
 import { ctx, type ViewProps } from "./types";
@@ -21,6 +21,7 @@ export default function Oversikt({ ds, sel, state, update }: ViewProps) {
   const natRate = useMemo(() => (k.pop && sel.geo.kind !== "all" ? nationalRate(sel) : 0), [sel, k.pop]);
   const facts = useMemo(() => insights(sel), [sel]);
   const trend = useMemo(() => monthlyTrend(sel), [sel]);
+  const changes = useMemo(() => changeStats(sel), [sel]);
   const classes = useMemo(() => (top === "*" ? topClassItems(sel) : subClassItems(sel, top)), [sel, top]);
   const outcomes = useMemo(() => outcomeStats(sel, OUT_LABEL), [sel]);
   const persons = useMemo(() => personStats(sel), [sel]);
@@ -97,6 +98,33 @@ export default function Oversikt({ ds, sel, state, update }: ViewProps) {
           />
         )}
       </Panel>
+      {changes.applicable && (
+        <Panel span={12} id="chg-title" title={changes.title}
+          lede={changes.hasPrev
+            ? `${tname(ds, cls)}, ${p.label} mot året før. Endring i antall hendelser; bare steder med minst ${MIN_CHANGE} hendelser i ett av årene.`
+            : "Velg «Siste 12 hele mnd» eller 2025 for å sammenligne med året før."}>
+          {changes.hasPrev && (
+            <div className="chg-grid">
+              {([["Økt mest", changes.ups, "+"], ["Falt mest", changes.downs, "−"]] as const).map(([head, items, sign]) => (
+                <div key={head}>
+                  <h3>{head}</h3>
+                  <BarList
+                    items={items} label={head} fmt={(v) => `${sign}${fmtNum(v)}`}
+                    selectable={(i) => i.geo != null}
+                    onSelect={(i) => { if (i.geo) update({ geo: i.geo }); }}
+                    tip={(i) => (
+                      <>
+                        <b>{i.label}</b><br />{fmtNum(i.o)} → {fmtNum(i.c)} ({i.d > 0 ? "+" : ""}{fmtNum(i.d)}{i.o ? `, ${i.d > 0 ? "+" : ""}${fmtPct(i.d / i.o)}` : ""})
+                        {i.geo && <><br /><i>Klikk for å velge</i></>}
+                      </>
+                    )}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      )}
       <Panel span={6} id="outcomes-title" title="Hva politiet gjorde"
         lede={`Hentet fra teksten: hva politiet gjorde. ${fmtNum(outcomes.any)} av ${fmtNum(outcomes.n)} hendelser (${fmtPct(outcomes.n ? outcomes.any / outcomes.n : 0)}) nevner et utfall.`}>
         <BarList items={outcomes.items} label="Hva politiet gjorde"
@@ -116,7 +144,7 @@ export default function Oversikt({ ds, sel, state, update }: ViewProps) {
             </p>
           </>
         ) : (
-          <p className="note">Bare {fmtNum(persons.total)} personer er omtalt med kjønn og alder i utvalget – for få til å vise en fordeling. Prøv et større område eller en lengre periode.</p>
+          <p className="note">{persons.total ? `Bare ${fmtNum(persons.total)} personer er omtalt` : "Ingen personer er omtalt"} med kjønn og alder i utvalget – for få til å vise en fordeling. Prøv et større område eller en lengre periode.</p>
         )}
       </Panel>
     </div>

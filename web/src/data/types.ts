@@ -39,6 +39,8 @@ export interface Sample {
   k: number;
   /** bydelsindeks (1-basert, 0 = ingen) */
   b: number;
+  /** stedsindeks (1-basert, 0 = ukjent sted) */
+  a: number;
 }
 
 /** Ring av [lon, lat]-punkter. */
@@ -57,8 +59,8 @@ export interface Kommune {
   bbox: [number, number, number, number];
 }
 
-/** [navn, type, bydel, lat, lon, kommuneindeks, nøkkel] */
-export type AreaRow = [string, string, string | null, number | null, number | null, number, string];
+/** [navn, type, bydel, lat, lon, kommuneindeks, nøkkel, antall hendelser] */
+export type AreaRow = [string, string, string | null, number | null, number | null, number, string, number];
 
 /** [kommunenr, navn, distrikts-id, antall hendelser, folketall (SSB) eller null] */
 export type MuniRow = [string, string, number, number, (number | null)?];
@@ -95,4 +97,6 @@ export interface AppData {
   example: Record<string, unknown[][]>;
   fylker: Fylke[];
   kommuner: Kommune[];
+  /** bydelsgrenser (OSM): kommunenr -> bydel -> ringer av [lon, lat]. Mangler eller er tom hvis de ikke er hentet. */
+  bydelGeo?: Record<string, Record<string, Ring[]>>;
 }

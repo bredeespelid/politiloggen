@@ -3,10 +3,11 @@ import { BarList } from "../components/BarList";
 import { LineChart } from "../components/LineChart";
 import { Panel, Segmented } from "../components/ui";
 import { tname } from "../data/dataset";
-import { distribution, MIN_SAMPLE, nationalRate, type DistMode } from "../lib/aggregate";
+import { distribution, MIN_SAMPLE, nationalRate, type DistMode, type FLevel } from "../lib/aggregate";
 import { fmt1, fmtNum, fmtPct, mlabel } from "../lib/format";
 import type { ViewProps } from "./types";
 
+const LEVEL_OPTIONS = [["bydel", "Bydeler"], ["sted", "Steder (Grønland osv.)"]] as const;
 const MODE_LABEL: Record<DistMode, string> = { pop: "Per 1 000 innbyggere", share: "Andel av områdets hendelser", abs: "Antall" };
 
 export default function Fordeling({ ds, sel, state, update }: ViewProps) {
@@ -19,7 +20,7 @@ export default function Fordeling({ ds, sel, state, update }: ViewProps) {
 
   const note = [
     L.note,
-    d.unplaced != null && d.total ? `${fmtNum(d.unplaced)} hendelser (${fmtPct(d.unplaced / d.total)}) er uten bydel.` : "",
+    d.unplaced != null && d.total ? `${fmtNum(d.unplaced)} hendelser (${fmtPct(d.unplaced / d.total)}) er ${L.places ? "uten oppgitt sted" : "uten bydel"}.` : "",
     mode === "pop"
       ? `Per innbygger: hendelser per år delt på folketall (SSB ${ds.app.populationYear}). Snittet for hele landet er ${fmt1(natRate)}. Kommuner med mange besøkende, som byer med uteliv, får høye tall.`
       : "",
@@ -29,6 +30,9 @@ export default function Fordeling({ ds, sel, state, update }: ViewProps) {
   return (
     <div className="grid">
       <Panel span={5} id="f-title" title={L.title} lede={`${tname(ds, state.cls)}, ${sel.period.label}.`}>
+        {sel.geo.kind === "m" && sel.geo.hasBydel && (
+          <Segmented<FLevel> label="Nivå" value={state.flevel} options={LEVEL_OPTIONS} onChange={(flevel) => update({ flevel })} />
+        )}
         {d.modes.length > 1 && (
           <Segmented<DistMode> label="Måltall" value={mode} options={d.modes.map((m) => [m, MODE_LABEL[m]] as const)} onChange={(dmode) => update({ dmode })} />
         )}

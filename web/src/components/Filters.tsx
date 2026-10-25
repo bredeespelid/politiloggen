@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { childrenOf, dname, muniName, tname, type Dataset } from "../data/dataset";
-import type { GeoInfo } from "../lib/geo";
+import { placeOptions, resolvePlace, type GeoInfo } from "../lib/geo";
 import { PERIOD_KEYS, PERIOD_LABEL, type PeriodKey } from "../lib/period";
 import type { AppState } from "../state/appState";
 import { Segmented } from "./ui";
@@ -15,6 +15,41 @@ interface Props {
 
 /** Kommuner med minst så mange hendelser står i områdelisten. */
 const MIN_MUNI = 300;
+
+/** «Finn sted»: søk i de mest brukte stedsnavnene (strøk, gater, sentrum) og velg ett enkelt sted. */
+function FindPlace({ ds, geo, update }: Pick<Props, "ds" | "geo" | "update">) {
+  const options = useMemo(() => placeOptions(ds), [ds]);
+  const [text, setText] = useState(geo.kind === "a" ? geo.label : "");
+  const [bad, setBad] = useState(false);
+  // Feltet viser stedet som er valgt, og tømmes når et annet område velges.
+  useEffect(() => { setText(geo.kind === "a" ? geo.label : ""); setBad(false); }, [geo.kind, geo.label]);
+
+  const pick = (value: string) => {
+    if (!value.trim()) return;
+    const a = resolvePlace(options, value);
+    setBad(a == null);
+    if (a != null) update({ geo: `a:${a}` });
+  };
+  return (
+    <label className="search place-search">Finn sted
+      <input
+        type="search" list="places" value={text} placeholder="F.eks. Grønland" autoComplete="off"
+        aria-invalid={bad || undefined} aria-describedby={bad ? "place-err" : undefined}
+        onChange={(e) => {
+          setText(e.target.value);
+          setBad(false);
+          // Et valg i listen gir eksakt treff med en gang.
+          const exact = options.find((o) => o.value === e.target.value);
+          if (exact) update({ geo: `a:${exact.a}` });
+        }}
+        onKeyDown={(e) => { if (e.key === "Enter") pick(text); }}
+        onBlur={() => { if (text !== geo.label) pick(text); }}
+      />
+      <datalist id="places">{options.map((o) => <option key={o.value} value={o.value} />)}</datalist>
+      {bad && <span id="place-err" className="field-error" role="alert">Fant ikke stedet. Velg fra listen.</span>}
+    </label>
+  );
+}
 
 export function Filters({ ds, state, geo, update }: Props) {
   const geoOptions = useMemo(() => {
@@ -44,6 +79,7 @@ export function Filters({ ds, state, geo, update }: Props) {
   const geoListed = useMemo(() => {
     const g = state.geo;
     if (g === "all" || g.startsWith("b:") || g.startsWith("d:")) return true;
+    if (g.startsWith("a:")) return false;
     const m = ds.app.munis[(ds.muniIdx.get(g.slice(2)) ?? 0) - 1];
     return !!m && m[3] >= MIN_MUNI;
   }, [ds, state.geo]);
@@ -73,6 +109,7 @@ export function Filters({ ds, state, geo, update }: Props) {
           {!geoListed && <option value={state.geo}>{geo.label}</option>}
         </select>
       </label>
+      <FindPlace ds={ds} geo={geo} update={update} />
       <label>Type hendelse
         <select value={state.cls} onChange={(e) => update({ cls: e.target.value })}>{clsOptions}</select>
       </label>
