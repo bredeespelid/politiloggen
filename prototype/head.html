@@ -824,6 +824,10 @@ nav.tabs { mask-image: linear-gradient(90deg, #000 85%, transparent); -webkit-ma
 tr.drill { cursor: pointer; }
 tr.drill:hover td, tr.drill:focus-visible td { background: var(--surface-2); }
 tr.drill:focus-visible { outline: 2px solid var(--accent); }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+@media (max-width: 800px) { .grid3 { grid-template-columns: 1fr; } }
+.grid3 h3 { font: 600 13px var(--font-body); margin: 0 0 6px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .06em; }
+.tag.sev { border-color: var(--flag); color: var(--flag); }
 .chg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 @media (max-width: 700px) { .chg-grid { grid-template-columns: 1fr; } }
 .chg-grid h3 { font: 600 13px var(--font-body); margin: 0 0 6px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .06em; }

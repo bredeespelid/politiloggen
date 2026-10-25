@@ -11,6 +11,7 @@ Grenser hentes fra Kartverket (kommuneinfo) og forenkles med Douglas–Peucker.
 
 import argparse
 import json
+from pathlib import Path
 import re
 import sqlite3
 import urllib.request
@@ -25,11 +26,18 @@ B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 # (felt, antall tegn) – 6 bit per tegn
 REC_FIELDS = [("month", 1), ("hourOfWeek", 2), ("district", 1), ("muni", 2), ("category", 1), ("tops", 2),
-              ("subs", 5), ("outcomes", 1), ("persons", 3), ("area", 3), ("areaType", 1), ("bydel", 1), ("weapon", 1)]
+              ("subs", 5), ("outcomes", 2), ("persons", 3), ("area", 3), ("areaType", 1), ("bydel", 1), ("weapon", 1),
+              ("meta", 2)]
 AREA_TYPES = ["mangler", "strøk", "sentrum", "gate", "vei", "kollektiv", "virksomhet", "natur", "kommune"]
-OUTCOMES = ["pågrepet", "anmeldt", "innbrakt", "bortvist", "førerkortbeslag", "forelegg"]
+OUTCOMES = ["pågrepet", "siktet", "anmeldt", "innbrakt", "bortvist", "førerkortbeslag", "forelegg", "funnet"]
 GENDER = {"mann": 0, "gutt": 0, "kvinne": 1, "jente": 1}
-AGES = ["10-årene", "20-årene", "30-årene", "40-årene", "50-årene", "60-årene", "70-årene", "80-årene"]
+AGES = ["barn", "10-årene", "20-årene", "30-årene", "40-årene", "50-årene", "60-årene", "70-årene", "80+"]
+# Språkmodellens vurderinger pakkes i feltet «meta»: severity(2 bit) | sentiment(2) | injury(3) | exercise(1) | confidence(2)
+SEVERITIES = ["lav", "middels", "høy"]
+SENTIMENTS = ["negativ", "nøytral", "positiv"]
+INJURIES = ["ingen", "lettere", "alvorlig", "dødsfall", "ukjent"]
+CONFIDENCES = ["høy", "middels", "lav"]
+LLM_WEAPONS = ["kniv", "skytevåpen", "øks", "slagvåpen", "annet"]
 
 
 def enc(value: int, width: int) -> str:
@@ -133,6 +141,8 @@ def main():
     ap.add_argument("--kommuner", type=int, default=24, help="Antall kommuner (etter volum) som får egne grenser")
     ap.add_argument("--basemap", help="basemap.json fra build_basemap.py (innebygde kartfliser)")
     ap.add_argument("--bydel-geo", default="prototype/data/bydeler.json", help="Bydelsgrenser fra fetch_bydel_geo.py")
+    ap.add_argument("--llm", default="data/incident_llm_class.parquet",
+                    help="Språkmodell-klassifisering fra classify_llm.py; hendelser uten rad faller tilbake på nøkkelordene")
     args = ap.parse_args()
     con = sqlite3.connect(args.db)
     q = lambda sql, *a: con.execute(sql, a).fetchall()
@@ -163,12 +173,32 @@ def main():
     bydeler = sorted({(m, b) for (m, _), b in bydel_of.items()})
     b_idx = {mb: i + 1 for i, mb in enumerate(bydeler)}
     weapons = [w for (w,) in q("SELECT DISTINCT weapon FROM incident_class WHERE weapon IS NOT NULL ORDER BY 1")]
+    llm = {}
+    if args.llm and Path(args.llm).exists():
+        import pyarrow.parquet as pq
+        llm_table = pq.read_table(args.llm)
+        llm = {r["thread_id"]: r for r in llm_table.to_pylist()}
+        weapons = LLM_WEAPONS
+        print(f"Språkmodell-klassifisering: {len(llm):,} av {q('SELECT COUNT(*) FROM incident')[0][0]:,} hendelser")
     w_idx = {w: i + 1 for i, w in enumerate(weapons)}
 
-    classes = defaultdict(list)
+    classes = defaultdict(list)   # tid -> [(kode, våpen, utfall, personer)]; første element bærer våpen/utfall/personer
     for tid, code, weapon, outcome, persons in q(
             "SELECT thread_id, taxonomy_code, weapon, outcome, persons FROM incident_class"):
         classes[tid].append((code, weapon, json.loads(outcome), json.loads(persons)))
+    meta = {}                     # tid -> (alvorlighet, tone, skade, øvelse, sikkerhet) som indekser
+    for tid, r in llm.items():
+        if r["is_exercise"]:
+            codes, weapon = ["annet"], None
+        else:
+            codes = [r["primary_type"]] + [c for c in r["subtypes"] if c in tax and c != r["primary_type"]]
+            weapon = r["weapon"] if r["weapon"] in LLM_WEAPONS else None
+        outcome = [o for o in r["outcome"] if o in OUTCOMES]
+        persons = [{"kjønn": p["gender"], "alder": p["age_group"]} for p in r["persons"]
+                   if p["gender"] != "ukjent" or p["age_group"] != "ukjent"]
+        classes[tid] = [(c, weapon, outcome, persons) for c in codes]
+        meta[tid] = (SEVERITIES.index(r["severity"]), SENTIMENTS.index(r["sentiment"]), INJURIES.index(r["injury"]),
+                     int(r["is_exercise"]), CONFIDENCES.index(r["confidence"]))
 
     rows = q("SELECT thread_id, district_id, municipality_id, category, area_key, created_on FROM incident ORDER BY created_on")
     months = sorted({local(r[5]).strftime("%Y-%m") for r in rows})
@@ -184,17 +214,19 @@ def main():
             if parent:
                 sub_mask |= 1 << subs.index(code)
         _, weapon, outcome, persons = cl[0]
+        sev, sent, inj, ex, conf = meta.get(tid, (1, 1, 4, 0, 2))
         out_mask = sum(1 << OUTCOMES.index(o) for o in outcome if o in OUTCOMES)
         pcode, n = 0, 0
         for p in persons:
             if p["kjønn"] in GENDER and p["alder"] in AGES and n < 3:
-                pcode = pcode * 32 + 1 + GENDER[p["kjønn"]] * 8 + AGES.index(p["alder"])
+                pcode = pcode * 64 + 1 + GENDER[p["kjønn"]] * 16 + AGES.index(p["alder"])
                 n += 1
         values = {"month": mo_idx[dt.strftime("%Y-%m")], "hourOfWeek": dt.weekday() * 24 + dt.hour,
                   "district": d_idx[did], "muni": m_idx.get(mid, 0), "category": c_idx[cat], "tops": top_mask,
                   "subs": sub_mask, "outcomes": out_mask, "persons": pcode, "area": a_idx.get((mid, akey), 0),
                   "areaType": AREA_TYPES.index(area_type_of.get((mid, akey), "mangler")),
-                  "bydel": b_idx.get((mid, bydel_of.get((mid, akey))), 0), "weapon": w_idx.get(weapon, 0)}
+                  "bydel": b_idx.get((mid, bydel_of.get((mid, akey))), 0), "weapon": w_idx.get(weapon, 0),
+                  "meta": sev + 4 * sent + 16 * inj + 128 * ex + 256 * conf}
         rec.append("".join(enc(values[f], w) for f, w in REC_FIELDS))
 
     # Siste hendelser: generelt + per stor kommune, så hendelseslisten har innhold uansett valgt område.
@@ -219,6 +251,9 @@ def main():
                         "area": area, "created": created[:19] + "Z", "messages": n, "active": bool(active),
                         "text": clip(first), "update": clip(last) if n > 1 and last != first else None, "classes": [c[0] for c in cl],
                         "weapon": cl[0][1], "outcome": cl[0][2], "persons": cl[0][3],
+                        "severity": llm[tid]["severity"] if tid in llm else None,
+                        "sentiment": llm[tid]["sentiment"] if tid in llm else None,
+                        "exercise": bool(llm[tid]["is_exercise"]) if tid in llm else False,
                         "d": d_idx[did], "k": m_idx.get(mid, 0), "b": b_idx.get((mid, bydel_of.get((mid, akey))), 0), "a": a_idx.get((mid, akey), 0)})
     samples.sort(key=lambda s: s["created"], reverse=True)
 
@@ -233,6 +268,7 @@ def main():
     counts = {t: q(f"SELECT COUNT(*) FROM {t}")[0][0] for t in
               ["incident", "message", "message_version", "incident_class", "dim_taxonomy", "dim_district",
                "dim_municipality", "dim_area", "geo_area"]}
+    counts["incident_llm_class"] = len(llm)
     example = {
         "incident": q("SELECT * FROM incident WHERE message_count > 2 ORDER BY created_on DESC LIMIT 1"),
         "message": q("""SELECT message_id, thread_id, seq, substr(text,1,80), has_image, is_edited, is_removed,
@@ -241,12 +277,18 @@ def main():
         "dim_area": q("SELECT * FROM dim_area WHERE municipality_id = '0301' AND area_key IN ('grønland', 'storgata', 'oslo s')"),
         "geo_area": q("SELECT * FROM geo_area WHERE municipality_id = '0301' AND area_key IN ('grønland', 'storgata', 'oslo s')"),
     }
+    if llm:
+        cols = llm_table.column_names
+        text = lambda v: json.dumps(v, ensure_ascii=False) if isinstance(v, (list, dict)) else (v.isoformat() if isinstance(v, datetime) else v)
+        example["incident_llm_class"] = [[text(llm[t][c]) for c in cols] for t in list(llm)[:2]]
     fylker, kommuner = boundaries(q, args.kommuner)
 
     out = {
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "span": q("SELECT MIN(created_on), MAX(created_on) FROM incident")[0],
-        "classifier": "regex-v1", "areaClassifier": "area-v1",
+        "classifier": "llm-v1" if llm else "regex-v1", "classifierModel": "claude-haiku-5-5" if llm else None,
+        "areaClassifier": "area-v1",
+        "severities": SEVERITIES, "sentiments": SENTIMENTS, "injuries": INJURIES,
         "recFields": REC_FIELDS, "rec": "".join(rec),
         "months": months, "tops": tops, "subs": subs,
         "taxonomy": {c: {"parent": p, "name": n} for c, (p, n) in tax.items()},

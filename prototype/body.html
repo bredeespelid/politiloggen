@@ -21,8 +21,9 @@
     <details id="howto"><summary>Slik leser du tallene</summary>
       <dl class="glossary">
         <dt>Hendelse</dt><dd>Én sak i Politiloggen. En hendelse kan ha flere meldinger (oppdateringer). Tallene her teller hendelser.</dd>
-        <dt>Type og undertype</dt><dd>Vår egen inndeling, laget ut fra teksten i meldingene. Politiets egen kategori kan være en annen: et slagsmål kan stå som «Ro og orden» hos politiet, men telles som vold her. Én hendelse kan få flere undertyper, f.eks. ran med kniv.</dd>
+        <dt>Type og undertype</dt><dd>Vår egen inndeling, laget av en språkmodell (Claude Haiku) som har lest teksten i hver hendelse. Politiets egen kategori kan være en annen: et slagsmål kan stå som «Ro og orden» hos politiet, men telles som vold her. Én hendelse kan få flere undertyper, f.eks. ran med kniv.</dd>
         <dt>Område og sted</dt><dd>Stedet politiet oppgir, vasket og koblet til bydel (Oslo og Bergen) og kart. Veier og hendelser uten sted vises ikke på kartet.</dd>
+        <dt>Alvorlighet, skade og tone</dt><dd>Språkmodellens vurdering av hver hendelse ut fra teksten: lav, middels eller høy alvorlighet, skade på personer, og om teksten er negativ, nøytral eller positiv. Politiloggen er saklig skrevet, så de fleste hendelser er nøytrale.</dd>
         <dt>Endring mot året før</dt><dd>Samme periode ett år tidligere. Endringer i hva politiet velger å publisere påvirker tallene.</dd>
         <dt>Viktig</dt><dd>Politiloggen viser det operasjonssentralene publiserer. Det er ikke kriminalstatistikk, og distrikter publiserer ulikt mye.</dd>
       </dl>
@@ -32,6 +33,7 @@
     <label for="f-geo">Område<select id="f-geo"></select></label>
     <label for="f-place" class="search place-search">Finn sted<input id="f-place" type="search" list="places" placeholder="F.eks. Grønland" autocomplete="off"></label><datalist id="places"></datalist>
     <label for="f-class">Type hendelse<select id="f-class"></select></label>
+    <label for="f-sev">Alvorlighet<select id="f-sev"><option value="*">Alle</option><option value="høy">Høy</option><option value="middels">Middels</option><option value="lav">Lav</option></select></label>
     <div style="display:grid;gap:4px"><span style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600">Periode</span>
       <div class="seg" id="f-period" role="group" aria-label="Periode">
         <button type="button" data-p="12m">Siste 12 hele mnd</button><button type="button" data-p="2025">2025</button><button type="button" data-p="2024">2024</button><button type="button" data-p="alle">Alt</button>
@@ -46,6 +48,8 @@
     <div class="panel span-8"><h2 id="trend-title">Hendelser per måned</h2><p class="lede" id="trend-lede"></p><div class="legend" id="trend-legend"></div><div class="chart" id="trend"></div></div>
     <div class="panel span-4"><h2 id="sub-title">Underklasser</h2><p class="lede" id="sub-lede">Én hendelse kan få flere underklasser, f.eks. ran med kniv.</p><div class="bars" id="subs"></div></div>
     <div class="panel span-12"><h2 id="chg-title">Hvor endrer det seg?</h2><p class="lede" id="chg-lede"></p><div class="chg-grid"><div><h3>Økt mest</h3><div class="bars" id="chg-up"></div></div><div><h3>Falt mest</h3><div class="bars" id="chg-down"></div></div></div></div>
+    <div class="panel span-12"><h2>Alvorlighet, skade og tone</h2><p class="lede" id="sev-lede"></p>
+      <div class="grid3"><div><h3>Alvorlighet</h3><div class="bars" id="sev-bars"></div></div><div><h3>Skade på personer</h3><div class="bars" id="inj-bars"></div></div><div><h3>Tone i teksten</h3><div class="bars" id="sent-bars"></div></div></div></div>
     <div class="panel span-6"><h2>Hva politiet gjorde</h2><p class="lede" id="outcomes-lede">Hentet fra teksten: hva politiet gjorde.</p><div class="bars" id="outcomes"></div></div>
     <div class="panel span-6"><h2>Hvem er omtalt</h2><p class="lede">Kjønn og aldersgruppe der teksten nevner det, f.eks. «mann i 20-årene».</p><div class="legend" id="persons-legend"></div><div class="chart" id="persons"></div></div>
   </section>
@@ -94,7 +98,7 @@
       <div class="legend" id="cross-legend"></div><div class="tbl-wrap" id="cross"></div></div>
     <div class="panel span-7"><h2>Taksonomi</h2><p class="lede" id="tree-lede"></p><div class="tree" id="tree"></div></div>
     <div class="panel span-5"><h2>Våpen nevnt</h2><p class="lede" id="weapons-lede"></p><div class="bars" id="weapons"></div>
-      <p class="note">Klassifisert automatisk med nøkkelord (versjon regex-v1). En språkmodell vil skille bedre, f.eks. «stukket av» fra knivstikking.</p></div>
+      <p class="note" id="weapons-note"></p></div>
     <div class="panel span-12"><h2>Slik vaskes stedsnavn</h2><p class="lede" id="variants-lede">Politiet skriver stedet som fritekst. Ulike skrivemåter av samme sted samles til én nøkkel.</p><div class="tbl-wrap" id="a-variants"></div></div>
   </section>
 
@@ -191,10 +195,10 @@ const PERIODS = {
 const periodInfo = () => PERIODS[state.period]();
 
 // ---------- Tilstand ----------
-const state = { geo: "m:0301", cls: "*", period: "12m", dmode: "pop", tab: "oversikt", mview: "geo", mkind: "heat", flevel: "bydel" };
+const state = { geo: "m:0301", cls: "*", period: "12m", dmode: "pop", tab: "oversikt", mview: "geo", mkind: "heat", flevel: "bydel", sev: "*" };
 const STORE = "pl-state-v2";
 try { Object.assign(state, JSON.parse(localStorage.getItem(STORE) || "{}")); } catch {}
-const save = () => { try { const { geo, cls, period, dmode, mview, mkind, flevel } = state; localStorage.setItem(STORE, JSON.stringify({ geo, cls, period, dmode, mview, mkind, flevel })); } catch {} };
+const save = () => { try { const { geo, cls, period, dmode, mview, mkind, flevel, sev } = state; localStorage.setItem(STORE, JSON.stringify({ geo, cls, period, dmode, mview, mkind, flevel, sev })); } catch {} };
 
 // Område: "all" | "d:<distrikts-id>" | "m:<kommunenr>" | "b:<kommunenr>|<bydel>" | "a:<stedsindeks>" (ett enkelt sted, f.eks. Grønland)
 function geoInfo(g = state.geo) {
@@ -211,16 +215,22 @@ function geoMask() {
   const g = geoInfo(), mask = new Uint8Array(N); for (let r = 0; r < N; r++) mask[r] = g.test(r) ? 1 : 0;
   return (geoCache = { key: state.geo, mask }).mask;
 }
-function clsTest(c = state.cls) {
-  if (c === "*") return () => true;
-  if (D.taxonomy[c].parent) { const bit = 1 << SUBS.indexOf(c); return r => (COL.subs[r] & bit) !== 0; }
-  const bit = 1 << TOPS.indexOf(c); return r => (COL.tops[r] & bit) !== 0;
+// Type (og undertype) og alvorlighet. Alvorlighet er språkmodellens vurdering og ligger i de to laveste bitene av «meta».
+function clsTest(c = state.cls, withSev = true) {
+  let base;
+  if (c === "*") base = () => true;
+  else if (D.taxonomy[c].parent) { const bit = 1 << SUBS.indexOf(c); base = r => (COL.subs[r] & bit) !== 0; }
+  else { const bit = 1 << TOPS.indexOf(c); base = r => (COL.tops[r] & bit) !== 0; }
+  const sev = withSev && state.sev !== "*" ? D.severities.indexOf(state.sev) : -1;
+  return sev < 0 ? base : r => (COL.meta[r] & 3) === sev && base(r);
 }
 // Går gjennom hendelsene i valgt område og månedsintervall.
-function scan(fn, from = periodInfo().from, to = periodInfo().to, mask = geoMask()) {
-  const a = mIdx(from), b = mIdx(to), M = COL.month;
+// Alvorlighetsfilteret gjelder alle tall på siden, unntatt fordelingen på alvorlighet selv (ignoreSev).
+function scan(fn, from = periodInfo().from, to = periodInfo().to, mask = geoMask(), ignoreSev = false) {
+  const a = mIdx(from), b = mIdx(to), M = COL.month, META = COL.meta;
   if (from > LAST || to < MONTHS[0]) return;
-  for (let r = 0; r < N; r++) if (mask[r] && M[r] >= a && M[r] <= b) fn(r);
+  const sev = !ignoreSev && state.sev !== "*" ? D.severities.indexOf(state.sev) : -1;
+  for (let r = 0; r < N; r++) if (mask[r] && M[r] >= a && M[r] <= b && (sev < 0 || (META[r] & 3) === sev)) fn(r);
 }
 
 // ---------- Tooltip ----------
@@ -347,17 +357,17 @@ function renderKpis() {
 function renderInsights() {
   const p = periodInfo(), g = geoInfo(), c = state.cls, test = clsTest(), lab = tname(c).toLowerCase();
   const T = TOPS.length, cur = new Array(T).fill(0), prv = new Array(T).fill(0);
-  let n = 0, tot = 0, prev = 0, night = 0;
+  let n = 0, tot = 0, prev = 0, night = 0, hi = 0, hurt = 0;
   const grid = new Array(168).fill(0), child = new Map(), L = childLevel(), places = new Map();
   scan(r => {
     tot++; for (let k = 0; k < T; k++) if (COL.tops[r] & (1 << k)) cur[k]++;
     if (!test(r)) return;
-    n++; grid[COL.hourOfWeek[r]]++; const h = COL.hourOfWeek[r] % 24; if (h >= 22 || h < 6) night++;
+    n++; { const m = COL.meta[r]; if ((m & 3) === 2) hi++; const ij = (m >> 4) & 7; if (ij === 2 || ij === 3) hurt++; } grid[COL.hourOfWeek[r]]++; const h = COL.hourOfWeek[r] % 24; if (h >= 22 || h < 6) night++;
     const k = L.key(r); if (!L.none(k)) child.set(k, (child.get(k) || 0) + 1);
     const pa = COL.area[r]; if (pa) places.set(pa, (places.get(pa) || 0) + 1);
   });
   if (p.prev) scan(r => { if (test(r)) prev++; for (let k = 0; k < T; k++) if (COL.tops[r] & (1 << k)) prv[k]++; }, p.prev[0], p.prev[1]);
-  const out = [];
+  const out = [], sevTxt = state.sev === "*" ? "" : ` med ${state.sev} alvorlighet`;
   const what = c === "*" ? "hendelser" : `hendelser med ${lab}`;
   if (!n) { document.getElementById("insights").innerHTML = `<li>Ingen ${esc(what)} ${esc(inGeo())} i perioden.</li>`; return; }
   if (p.prev && prev) {
@@ -374,14 +384,15 @@ function renderInsights() {
   } else {
     // Andel her mot andel i hele landet
     let nAll = 0, totAll = 0; const mask = geoMask(), a = mIdx(p.from), b = mIdx(p.to);
-    for (let r = 0; r < N; r++) { const mo = COL.month[r]; if (mo < a || mo > b) continue; totAll++; if (test(r)) nAll++; }
-    if (g.kind !== "all" && totAll) out.push(`${cap1(lab)} er <b>${PF.format(n / tot)}</b> av alle hendelser ${esc(inGeo())}, mot ${PF.format(nAll / totAll)} i hele landet.`);
-    else out.push(`${cap1(lab)} er <b>${PF.format(n / tot)}</b> av alle hendelser.`);
+    for (let r = 0; r < N; r++) { const mo = COL.month[r]; if (mo < a || mo > b) continue; if (state.sev !== "*" && (COL.meta[r] & 3) !== D.severities.indexOf(state.sev)) continue; totAll++; if (test(r)) nAll++; }
+    if (g.kind !== "all" && totAll) out.push(`${cap1(lab)} er <b>${PF.format(n / tot)}</b> av alle hendelser${sevTxt} ${esc(inGeo())}, mot ${PF.format(nAll / totAll)} i hele landet.`);
+    else out.push(`${cap1(lab)} er <b>${PF.format(n / tot)}</b> av alle hendelser${sevTxt}.`);
   }
   const best = [...child.entries()].sort((x, y) => y[1] - x[1])[0];
   if (best && child.size > 1) out.push(g.kind === "a" ? `Vanligste kategori hos politiet: <b>${esc(L.label(best[0]))}</b> (${NF.format(best[1])} hendelser).` : `Flest i <b>${esc(L.label(best[0]))}</b>: ${NF.format(best[1])} hendelser, ${PF.format(best[1] / n)} av ${esc(what)}.`);
   const topPlace = (g.kind === "a" || /^(Steder|Områder)/.test(L.title)) ? null : [...places.entries()].filter(([a]) => !["vei", "kommune", "sentrum"].includes(area(a)[1])).sort((x, y) => y[1] - x[1])[0];
   if (topPlace) out.push(`Mest omtalte sted: <b>${esc(area(topPlace[0])[0])}</b> (${NF.format(topPlace[1])} hendelser${area(topPlace[0])[2] ? `, bydel ${esc(area(topPlace[0])[2])}` : ""}).`);
+  if (hi && state.sev === "*") out.push(`<b>${PF.format(hi / n)}</b> av hendelsene er vurdert som alvorlige${hurt ? `, og ${NF.format(hurt)} har alvorlig skade eller dødsfall` : ""}.`);
   const days = WD.map((_, d) => grid.slice(d * 24, d * 24 + 24).reduce((s, v) => s + v, 0));
   const bd = days.indexOf(Math.max(...days));
   const blocks = Array.from({ length: 8 }, (_, k) => { let s = 0; for (let d = 0; d < 7; d++) for (let h = k * 3; h < k * 3 + 3; h++) s += grid[d * 24 + h]; return s; });
@@ -462,10 +473,21 @@ function renderSubs() {
   barList(el, items, { onClick: i => setState({ cls: i.code === state.cls ? top : i.code }) });
 }
 
+function renderSeverity() {
+  const test = clsTest(state.cls, false), n = [0, 0, 0], inj = new Array(D.injuries.length).fill(0), sent = [0, 0, 0]; let tot = 0, ex = 0;
+  scan(r => { if (!test(r)) return; const m = COL.meta[r]; tot++; n[m & 3]++; sent[(m >> 2) & 3]++; inj[(m >> 4) & 7]++; ex += (m >> 7) & 1; }, periodInfo().from, periodInfo().to, geoMask(), true);
+  document.getElementById("sev-lede").textContent = `${tname(state.cls)}, ${ctx()}. Språkmodellens vurdering ut fra teksten, ikke politiets. ${NF.format(tot)} hendelser${ex ? `, hvorav ${NF.format(ex)} øvelser` : ""}.${state.sev !== "*" ? ` Dette panelet viser alle alvorlighetsgrader; resten av siden er filtrert på «${state.sev}».` : ""}`;
+  const tip = (what, i) => `<b>${esc(i.label)}</b><br>${NF.format(i.v)} ${what} · ${PF.format(tot ? i.v / tot : 0)}`;
+  const sevItems = D.severities.map((l, k) => ({ label: cap1(l), v: n[k], key: l })).reverse();
+  barList(document.getElementById("sev-bars"), sevItems.map(i => ({ ...i, sel: state.sev === i.key })), { tipFmt: i => tip("hendelser", i) + "<br><i>Klikk for å filtrere</i>", onClick: i => setState({ sev: state.sev === i.key ? "*" : i.key }) });
+  barList(document.getElementById("inj-bars"), D.injuries.map((l, k) => ({ label: cap1(l), v: inj[k] })), { tipFmt: i => tip("hendelser", i) });
+  barList(document.getElementById("sent-bars"), D.sentiments.map((l, k) => ({ label: cap1(l), v: sent[k] })), { tipFmt: i => tip("hendelser", i) });
+}
+
 function renderOutcomes() {
   const test = clsTest(), cnt = new Array(D.outcomes.length).fill(0);
   scan(r => { if (!test(r)) return; const o = COL.outcomes[r]; for (let k = 0; k < cnt.length; k++) if (o & (1 << k)) cnt[k]++; });
-  const OUT_LABEL = { "pågrepet": "Pågrepet", "anmeldt": "Anmeldt", "innbrakt": "Innbrakt (tatt med til politiet)", "bortvist": "Bortvist", "førerkortbeslag": "Førerkort beslaglagt", "forelegg": "Bot (forelegg)" };
+  const OUT_LABEL = { "pågrepet": "Pågrepet", "anmeldt": "Anmeldt", "innbrakt": "Innbrakt (tatt med til politiet)", "bortvist": "Bortvist", "førerkortbeslag": "Førerkort beslaglagt", "forelegg": "Bot (forelegg)", "siktet": "Siktet", "funnet": "Funnet (savnet/gjenstand)" };
   let n = 0, any = 0; scan(r => { if (test(r)) { n++; if (COL.outcomes[r]) any++; } });
   const items = D.outcomes.map((o, k) => ({ label: OUT_LABEL[o] || o, v: cnt[k] })).filter(i => i.v > 0).sort((a, b) => b.v - a.v);
   document.getElementById("outcomes-lede").textContent = `Hentet fra teksten: hva politiet gjorde. ${NF.format(any)} av ${NF.format(n)} hendelser (${PF.format(n ? any / n : 0)}) nevner et utfall.`;
@@ -474,16 +496,17 @@ function renderOutcomes() {
 
 function renderPersons() {
   const test = clsTest(), el = document.getElementById("persons");
-  const S = [new Array(8).fill(0), new Array(8).fill(0)];
+  const NA = D.ages.length, S = [new Array(NA).fill(0), new Array(NA).fill(0)];
+  const ageLabel = a => a === "barn" ? "<10" : a === "80+" ? "80+" : `${a.slice(0, 2)}–${+a.slice(0, 2) + 9}`;
   let nInc = 0, withP = 0;
-  scan(r => { if (!test(r)) return; nInc++; if (COL.persons[r]) withP++; let p = COL.persons[r]; while (p > 0) { const d = (p % 32) - 1; p = Math.floor(p / 32); S[d >> 3][d & 7]++; } });
+  scan(r => { if (!test(r)) return; nInc++; if (COL.persons[r]) withP++; let p = COL.persons[r]; while (p > 0) { const d = (p % 64) - 1; p = Math.floor(p / 64); S[d >> 4][d & 15]++; } });
   const ser = [["Menn/gutter", "var(--series)"], ["Kvinner/jenter", "var(--series-2)"]];
   const totalP = S[0].concat(S[1]).reduce((a, b) => a + b, 0);
   if (totalP < 30) { document.getElementById("persons-legend").innerHTML = ""; el.innerHTML = `<p class="note">${totalP ? `Bare ${NF.format(totalP)} personer er omtalt` : "Ingen personer er omtalt"} med kjønn og alder i utvalget – for få til å vise en pålitelig fordeling (minst 30 trengs). Prøv et større område eller en lengre periode.</p>`; return; }
   document.getElementById("persons-legend").innerHTML = ser.map(([n, c]) => `<span><span class="sw" style="background:${c}"></span>${n}</span>`).join("");
   const W = Math.max(260, el.clientWidth || 500), H = 200, m = { l: 40, r: 8, t: 10, b: 24 };
   const max = nice(Math.max(1, ...S[0], ...S[1]));
-  const bw = (W - m.l - m.r) / 8, b = Math.max(4, Math.min(18, (bw - 10) / 2));
+  const bw = (W - m.l - m.r) / NA, b = Math.max(4, Math.min(18, (bw - 10) / 2));
   const y = v => m.t + (H - m.t - m.b) * (1 - v / max);
   let s = "";
   for (let k = 0; k <= 4; k++) { const v = max * k / 4; s += `<line class="grid-line" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text class="lbl" x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${NF.format(v)}</text>`; }
@@ -492,9 +515,9 @@ function renderPersons() {
     ser.forEach(([n, c], j) => {
       const v = S[j][i], x0 = cx - b - 1 + j * (b + 2), h = Math.max(0, y(0) - y(v)), rr = Math.min(4, h, b / 2);
       s += `<path d="M${x0},${y(0)}V${y(v) + rr}Q${x0},${y(v)} ${x0 + rr},${y(v)}H${x0 + b - rr}Q${x0 + b},${y(v)} ${x0 + b},${y(v) + rr}V${y(0)}Z" fill="${c}"/>`;
-      s += `<rect x="${x0 - 1}" y="${m.t}" width="${b + 2}" height="${H - m.t - m.b}" fill="transparent" data-tip="${esc(`<b>${n}, ${a}</b><br>${NF.format(v)} omtalt`)}"/>`;
+      s += `<rect x="${x0 - 1}" y="${m.t}" width="${b + 2}" height="${H - m.t - m.b}" fill="transparent" data-tip="${esc(`<b>${n}, ${a === "barn" ? "under 10 år" : a}</b><br>${NF.format(v)} omtalt`)}"/>`;
     });
-    s += `<text class="lbl" x="${cx}" y="${H - 6}" text-anchor="middle">${a.slice(0, 2)}–${+a.slice(0, 2) + 9}</text>`;
+    s += `<text class="lbl" x="${cx}" y="${H - 6}" text-anchor="middle">${ageLabel(a)}</text>`;
   });
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Omtalte personer etter alder og kjønn">${s}</svg><p class="note">Alder i år. ${NF.format(totalP)} omtalte personer i ${NF.format(withP)} av ${NF.format(nInc)} hendelser (${PF.format(nInc ? withP / nInc : 0)}) – de fleste meldinger nevner ikke alder og kjønn.</p>`;
   bindTips(el);
@@ -676,6 +699,7 @@ function renderTree() {
   const tc = new Array(TOPS.length).fill(0), sc = new Array(SUBS.length).fill(0), wc = new Array(D.weapons.length + 1).fill(0), test = clsTest();
   scan(r => { const t = COL.tops[r], s = COL.subs[r]; for (let k = 0; k < TOPS.length; k++) if (t & (1 << k)) tc[k]++; for (let k = 0; k < SUBS.length; k++) if (s & (1 << k)) sc[k]++; if (test(r)) wc[COL.weapon[r]]++; });
   document.getElementById("tree-lede").textContent = `To nivåer, med antall hendelser. ${ctx()}.`;
+  document.getElementById("weapons-note").textContent = D.classifierModel ? `Klassifisert av en språkmodell (${D.classifierModel}, ${D.classifier}) som har lest teksten i hver hendelse. Det finnes ingen fasit, så dette er modellens vurdering, ikke politiets.` : "Klassifisert automatisk med nøkkelord. Det finnes ingen fasit.";
   document.getElementById("weapons-lede").textContent = `${tname(state.cls)}, ${ctx()}.`;
   document.getElementById("tree").innerHTML = TOPS.map((t, k) => {
     const kids = childrenOf(t).map(c => ({ c, v: sc[SUBS.indexOf(c)] })).sort((a, b) => b.v - a.v);
@@ -692,13 +716,13 @@ function renderFeed() {
   const qEl = document.getElementById("feed-q"), q = (qEl.value || "").trim().toLowerCase();
   const inText = s => !q || `${s.text} ${s.update || ""} ${s.area || ""} ${s.municipality} ${s.category}`.toLowerCase().includes(q);
   const p = periodInfo(), inPer = s => { const m = new Date(s.created).toLocaleDateString("sv-SE", { timeZone: "Europe/Oslo" }).slice(0, 7); return m >= p.from && m <= (state.period === "12m" ? LAST : p.to); }; // listen tar med inneværende måned
-  const items = D.samples.filter(s => inGeo(s) && inCls(s) && inText(s) && inPer(s));
+  const items = D.samples.filter(s => inGeo(s) && inCls(s) && inText(s) && inPer(s) && (state.sev === "*" || s.severity === state.sev));
   let all = 0; { const test = clsTest(); scan(r => { if (test(r)) all++; }); }
   document.getElementById("feed-lede").textContent = `Viser ${NF.format(items.length)} av ${NF.format(all)} hendelser (${tname(c)}, ${g.label}, ${p.label}${q ? `, søk «${q}»` : ""}). Utvalget er de nyeste hendelsene per kommune og sted, så eldre hendelser mangler. Tallene i de andre fanene bygger på alle hendelser.`;
   document.getElementById("feed").innerHTML = items.slice(0, 60).map(s => `<article class="item">
     <div class="meta"><span class="where">${esc([s.area, s.b ? D.bydeler[s.b - 1][1] : null, s.municipality].filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i).join(", "))}</span><span>${esc(s.category)}</span><span>${fmtDate(s.created)}</span><span class="mono">${esc(s.id)}</span>${s.messages > 1 ? `<span>${s.messages} meldinger</span>` : ""}${s.active ? `<span class="live">Pågår</span>` : ""}</div>
     <p>${esc(s.text)}</p>${s.update ? `<p class="update"><b>Siste oppdatering:</b> ${esc(s.update)}</p>` : ""}
-    <div class="tags">${s.classes.map(x => `<span class="tag c">${esc(tname(x))}</span>`).join("")}${s.weapon ? `<span class="tag">våpen: ${esc(s.weapon)}</span>` : ""}${s.outcome.filter(o => !s.classes.some(x => tname(x).toLowerCase() === o)).map(o => `<span class="tag">${esc(o)}</span>`).join("")}${s.persons.map(pp => `<span class="tag p">${esc(pp.kjønn)} · ${esc(pp.alder)}</span>`).join("")}</div>
+    <div class="tags">${s.exercise ? `<span class="tag">øvelse</span>` : ""}${s.severity === "høy" ? `<span class="tag sev">alvorlig</span>` : ""}${s.classes.map(x => `<span class="tag c">${esc(tname(x))}</span>`).join("")}${s.weapon ? `<span class="tag">våpen: ${esc(s.weapon)}</span>` : ""}${s.outcome.filter(o => !s.classes.some(x => tname(x).toLowerCase() === o)).map(o => `<span class="tag">${esc(o)}</span>`).join("")}${s.persons.map(pp => `<span class="tag p">${esc(pp.kjønn)} · ${esc(pp.alder)}</span>`).join("")}</div>
   </article>`).join("") || `<p class="note">Ingen av hendelsene i prototypen passer filteret. Prøv en bredere klasse eller et større område.</p>`;
 }
 
@@ -876,7 +900,8 @@ const ENT = [
   ["incident", "Hendelse (tråd). Felt som er felles for hele tråden.", [["thread_id", "text", "PK"], ["district_id", "int", "FK"], ["municipality_id", "text", "FK"], ["municipality", "text"], ["category", "text"], ["area", "text"], ["area_key", "text", "FK"], ["is_active", "bool"], ["created_on", "timestamptz"], ["last_message_on", "timestamptz"], ["message_count", "int"], ["row_hash", "char(64)", "HASH"], ["first_seen_at", "timestamptz"], ["last_seen_at", "timestamptz"]]],
   ["message", "Én oppdatering. Gjeldende versjon.", [["message_id", "text", "PK"], ["thread_id", "text", "FK"], ["seq", "int"], ["text", "text"], ["has_image", "bool"], ["is_edited", "bool"], ["is_removed", "bool"], ["created_on", "timestamptz"], ["updated_on", "timestamptz"], ["content_hash", "char(64)", "HASH"]]],
   ["message_version", "Historikk (SCD2): én rad per faktisk innholdsendring.", [["message_id", "text", "PK"], ["content_hash", "char(64)", "PK"], ["text", "text"], ["valid_from", "timestamptz"], ["valid_to", "timestamptz"]]],
-  ["incident_class", "Vår klassifisering. Flere koder per hendelse, versjonert per klassifiserer.", [["thread_id", "text", "PK"], ["taxonomy_code", "text", "PK"], ["classifier_version", "text", "PK"], ["input_hash", "char(64)", "HASH"], ["confidence", "real"], ["weapon", "text"], ["outcome", "json"], ["persons", "json"], ["classified_at", "timestamptz"]]],
+  ["incident_class", "Nøkkelordklassifisering (regex-v1), beholdt som reserve og til sammenligning. Flere koder per hendelse.", [["thread_id", "text", "PK"], ["taxonomy_code", "text", "PK"], ["classifier_version", "text", "PK"], ["input_hash", "char(64)", "HASH"], ["confidence", "real"], ["weapon", "text"], ["outcome", "json"], ["persons", "json"], ["classified_at", "timestamptz"]]],
+  ["incident_llm_class", "Språkmodellens klassifisering (parquet-fil, data/incident_llm_class.parquet). Én rad per hendelse.", [["thread_id", "text", "PK"], ["classifier_version", "text"], ["model", "text"], ["classified_at", "timestamptz"], ["input_hash", "char(64)", "HASH"], ["primary_type", "text"], ["subtypes", "list"], ["is_exercise", "bool"], ["weapon", "text"], ["injury", "text"], ["severity", "text"], ["outcome", "list"], ["persons", "list"], ["status", "text"], ["sentiment", "text"], ["confidence", "text"]]],
   ["dim_taxonomy", "Egen taksonomi i to nivåer.", [["code", "text", "PK"], ["parent_code", "text", "FK"], ["name", "text"]]],
   ["dim_area", "Vasket og klassifisert område per kommune (area-v1).", [["municipality_id", "text", "PK"], ["area_key", "text", "PK"], ["name", "text"], ["area_type", "text"], ["bydel", "text"], ["variants", "int"], ["classifier_version", "text"]]],
   ["geo_area", "Koordinater fra Kartverket per område (inkrementell).", [["municipality_id", "text", "PK"], ["area_key", "text", "PK"], ["lat", "real"], ["lon", "real"], ["source", "text"], ["matched_name", "text"], ["matched_kind", "text"], ["geocoded_at", "timestamptz"]]],
@@ -888,7 +913,7 @@ function renderModel() {
     <div class="cols">${cols.map(([c, t, k]) => `<div class="col"><span>${c}</span><span class="ty">${t}</span>${k ? `<span class="k ${k === "PK" ? "pk" : k === "FK" ? "fk" : "h"}">${k}</span>` : "<span></span>"}</div>`).join("")}</div><p class="desc">${desc}</p></div>`).join("");
   const short = v => { const s = String(v ?? "NULL"); return /^[0-9a-f]{64}$/.test(s) ? s.slice(0, 10) + "…" : s.length > 60 ? s.slice(0, 57) + "…" : s; };
   const t = (name, rows) => `<h3 class="mono" style="margin:4px 0 6px;font-size:13px">${name}</h3><table><thead><tr>${ENT.find(e => e[0] === name)[2].map(c => `<th>${c[0]}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(v => `<td class="mono" style="background:var(--surface-2)">${esc(short(v))}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
-  document.getElementById("examples").innerHTML = ["incident", "message", "incident_class", "dim_area", "geo_area"].map(n => t(n, D.example[n])).join("");
+  document.getElementById("examples").innerHTML = ["incident", "message", "incident_llm_class", "dim_area", "geo_area"].map(n => t(n, D.example[n])).join("");
 }
 
 // ---------- Filtre, tilstand og ruting ----------
@@ -904,6 +929,7 @@ function setupFilters() {
   const sc = document.getElementById("f-class");
   sc.innerHTML = `<option value="*">Alle hendelser</option>` + TOPS.map(t => { const k = childrenOf(t); return `<option value="${t}">${esc(tname(t))}${k.length ? " – alle" : ""}</option>${k.length ? `<optgroup label="${esc(tname(t))}">${k.map(c => `<option value="${c}">${esc(tname(c))}</option>`).join("")}</optgroup>` : ""}`; }).join("");
   sc.addEventListener("change", () => setState({ cls: sc.value }));
+  document.getElementById("f-sev").addEventListener("change", e => setState({ sev: e.target.value }));
   document.querySelectorAll("#f-period button").forEach(b => b.addEventListener("click", () => setState({ period: b.dataset.p })));
   document.getElementById("f-reset").addEventListener("click", () => setState({ geo: "m:0301", cls: "*", period: "12m" }));
   document.querySelectorAll("#d-mode button").forEach(b => b.addEventListener("click", () => setState({ dmode: b.dataset.m })));
@@ -927,27 +953,29 @@ function setupFilters() {
   fp.addEventListener("change", pick);
   fp.addEventListener("keydown", e => { if (e.key === "Enter") pick(); });
   document.getElementById("status").innerHTML = `<span class="chip"><span class="dot"></span>Oppdatert ${fmtDate(D.span[1])}</span>`;
-  document.getElementById("foot-gen").textContent = `Databasen: ${NF.format(N)} hendelser fra ${fmtDate(D.span[0])} til ${fmtDate(D.span[1])}. Klassifisering ${D.classifier}, steder ${D.areaClassifier}.`;
+  document.getElementById("foot-gen").textContent = `Databasen: ${NF.format(N)} hendelser fra ${fmtDate(D.span[0])} til ${fmtDate(D.span[1])}. Klassifisering ${D.classifier}${D.classifierModel ? ` (${D.classifierModel})` : ""}, steder ${D.areaClassifier}.`;
 }
 function setState(patch) {
   Object.assign(state, patch);
   if (state.cls !== "*" && !D.taxonomy[state.cls]) state.cls = "*";
   if (!PERIODS[state.period]) state.period = "12m";
+  if (state.sev !== "*" && !D.severities.includes(state.sev)) state.sev = "*";
   const g = state.geo, ok = g === "all" || (g.startsWith("d:") && DIST_IDX[g.slice(2)] != null) || (g.startsWith("m:") && MUNI_IDX[g.slice(2)]) || (g.startsWith("b:") && BYDEL_IDX[g.slice(2)]) || (g.startsWith("a:") && D.areas[+g.slice(2) - 1] && D.areas[+g.slice(2) - 1][1] !== "vei");
   if (!ok) state.geo = "m:0301";
   save(); render();
 }
-const VIEWS = { oversikt: [renderKpis, renderInsights, renderTrend, renderChanges, renderSubs, renderOutcomes, renderPersons], kart: [renderMap], fordeling: [renderFordeling], omrader: [renderAreas], tidsmonster: [renderHeat, renderSeason], klassifisering: [renderCross, renderTree, renderVariants], hendelser: [renderFeed], datamodell: [renderModel] };
+const VIEWS = { oversikt: [renderKpis, renderInsights, renderTrend, renderChanges, renderSeverity, renderSubs, renderOutcomes, renderPersons], kart: [renderMap], fordeling: [renderFordeling], omrader: [renderAreas], tidsmonster: [renderHeat, renderSeason], klassifisering: [renderCross, renderTree, renderVariants], hendelser: [renderFeed], datamodell: [renderModel] };
 function render() {
   const sg = document.getElementById("f-geo");
   if (![...sg.options].some(o => o.value === state.geo)) sg.insertAdjacentHTML("beforeend", `<option value="${esc(state.geo)}">${esc(geoInfo().label)}</option>`);
   sg.value = state.geo;
   document.getElementById("f-place").value = state.geo.startsWith("a:") ? geoInfo().label : "";
   document.getElementById("f-class").value = state.cls;
+  document.getElementById("f-sev").value = state.sev;
   document.querySelectorAll("#f-period button").forEach(b => b.setAttribute("aria-pressed", b.dataset.p === state.period));
   document.getElementById("filters").hidden = state.tab === "datamodell";
   document.getElementById("intro").hidden = state.tab === "datamodell";
-  document.getElementById("f-reset").hidden = state.geo === "m:0301" && state.cls === "*" && state.period === "12m";
+  document.getElementById("f-reset").hidden = state.geo === "m:0301" && state.cls === "*" && state.period === "12m" && state.sev === "*";
   document.querySelectorAll("#tabs a").forEach(a => { if (a.dataset.tab === state.tab) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
   document.querySelectorAll("[data-view]").forEach(s => { s.hidden = s.dataset.view !== state.tab; });
   hideTip();
