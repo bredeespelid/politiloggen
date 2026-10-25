@@ -1,22 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Dataset } from "../data/dataset";
-import type { DistMode } from "../lib/aggregate";
+import { DIST_MODES, type DistMode } from "../lib/aggregate";
 import { isValidGeo } from "../lib/geo";
 import { isPeriodKey, type PeriodKey } from "../lib/period";
 
-export const TABS = [
-  ["oversikt", "Oversikt"],
-  ["kart", "Kart"],
-  ["fordeling", "Fordeling"],
-  ["omrader", "Områder"],
-  ["tidsmonster", "Tidsmønster"],
-  ["klassifisering", "Klassifisering"],
-  ["hendelser", "Hendelser"],
-  ["datamodell", "Datamodell"],
-] as const;
+export type Tab = "oversikt" | "kart" | "fordeling" | "tidsmonster" | "omrader" | "hendelser" | "klassifisering" | "datamodell";
 
-export type Tab = (typeof TABS)[number][0];
+export const TABS: readonly { id: Tab; label: string; meta?: boolean }[] = [
+  { id: "oversikt", label: "Oversikt" },
+  { id: "kart", label: "Kart" },
+  { id: "fordeling", label: "Fordeling" },
+  { id: "tidsmonster", label: "Når" },
+  { id: "omrader", label: "Steder" },
+  { id: "hendelser", label: "Hendelser" },
+  { id: "klassifisering", label: "Om klassifiseringen", meta: true },
+  { id: "datamodell", label: "Datamodell" },
+];
+
 export type MapView = "geo" | "norge";
+export type MapKind = "heat" | "dots";
 
 export interface AppState {
   geo: string;
@@ -25,24 +27,55 @@ export interface AppState {
   dmode: DistMode;
   tab: Tab;
   mview: MapView;
+  mkind: MapKind;
+  /** søk i hendelseslisten (ikke lagret i localStorage) */
+  q: string;
 }
 
 export const STORE_KEY = "pl-state-v2";
-export const DEFAULT_STATE: AppState = { geo: "m:0301", cls: "*", period: "12m", dmode: "share", tab: "oversikt", mview: "geo" };
+export const DEFAULT_GEO = "m:0301";
+export const DEFAULT_STATE: AppState = { geo: DEFAULT_GEO, cls: "*", period: "12m", dmode: "pop", tab: "oversikt", mview: "geo", mkind: "heat", q: "" };
 
-const isTab = (v: unknown): v is Tab => TABS.some(([t]) => t === v);
+const isTab = (v: unknown): v is Tab => TABS.some((t) => t.id === v);
 
-/** Retter opp ugyldige verdier (f.eks. lagret tilstand fra en eldre datafil). */
+/** Er filtrene (område, type, periode) uendret fra standardvalget? */
+export const isDefaultFilter = (s: AppState): boolean =>
+  s.geo === DEFAULT_STATE.geo && s.cls === DEFAULT_STATE.cls && s.period === DEFAULT_STATE.period;
+
+/** Retter opp ugyldige verdier (f.eks. lagret tilstand eller lenke fra en eldre datafil). */
 export function sanitize(ds: Dataset, s: Partial<AppState>): AppState {
   return {
-    geo: typeof s.geo === "string" && isValidGeo(ds, s.geo) ? s.geo : DEFAULT_STATE.geo,
+    geo: typeof s.geo === "string" && isValidGeo(ds, s.geo) ? s.geo : DEFAULT_GEO,
     cls: s.cls === "*" || (typeof s.cls === "string" && ds.app.taxonomy[s.cls]) ? s.cls : "*",
     period: isPeriodKey(s.period) ? s.period : DEFAULT_STATE.period,
-    dmode: s.dmode === "abs" ? "abs" : "share",
+    dmode: DIST_MODES.includes(s.dmode as DistMode) ? (s.dmode as DistMode) : DEFAULT_STATE.dmode,
     tab: isTab(s.tab) ? s.tab : DEFAULT_STATE.tab,
     mview: s.mview === "norge" ? "norge" : "geo",
+    mkind: s.mkind === "dots" ? "dots" : "heat",
+    q: typeof s.q === "string" ? s.q.slice(0, 100) : "",
   };
 }
+
+/** Filtre i adressen: ?geo=m:0301&cls=vold&p=12m (dm, mv, mk og q er valgfrie). */
+export function stateToQuery(s: AppState): string {
+  const p = new URLSearchParams({ geo: s.geo, cls: s.cls, p: s.period });
+  if (s.dmode !== DEFAULT_STATE.dmode) p.set("dm", s.dmode);
+  if (s.mview !== DEFAULT_STATE.mview) p.set("mv", s.mview);
+  if (s.mkind !== DEFAULT_STATE.mkind) p.set("mk", s.mkind);
+  if (s.q) p.set("q", s.q);
+  return p.toString();
+}
+
+export function queryToState(search: string): Partial<AppState> {
+  const p = new URLSearchParams(search), out: Record<string, string> = {};
+  for (const [param, key] of [["geo", "geo"], ["cls", "cls"], ["p", "period"], ["dm", "dmode"], ["mv", "mview"], ["mk", "mkind"], ["q", "q"]] as const) {
+    const v = p.get(param);
+    if (v != null) out[key] = v;
+  }
+  return out as Partial<AppState>;
+}
+
+const PERSISTED = ["geo", "cls", "period", "dmode", "mview", "mkind"] as const;
 
 function load(): Partial<AppState> {
   try {
@@ -54,7 +87,7 @@ function load(): Partial<AppState> {
 
 function save(s: AppState): void {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(s));
+    localStorage.setItem(STORE_KEY, JSON.stringify(Object.fromEntries(PERSISTED.map((k) => [k, s[k]]))));
   } catch {
     /* privat modus o.l. – appen virker uten lagring */
   }
@@ -65,30 +98,27 @@ const hashTab = (): Tab | null => {
   return isTab(h) ? h : null;
 };
 
-/** Filtertilstand: lagres i localStorage, fanen følger også #hash i adressen. */
+/**
+ * Filtertilstand. Adressen (?geo=…&cls=…&p=…) går foran localStorage («pl-state-v2»),
+ * som går foran standardvalgene. Fanen følger #hash.
+ */
 export function useAppState(ds: Dataset): [AppState, (patch: Partial<AppState>) => void] {
-  const [state, setState] = useState<AppState>(() => {
-    const stored = load();
-    return sanitize(ds, { ...stored, tab: hashTab() ?? stored.tab });
-  });
+  const [state, setState] = useState<AppState>(() =>
+    sanitize(ds, { ...load(), ...queryToState(location.search), tab: hashTab() ?? "oversikt" }));
 
   const update = useCallback(
     (patch: Partial<AppState>) => setState((s) => sanitize(ds, { ...s, ...patch })),
     [ds],
   );
 
-  useEffect(() => save(state), [state]);
-
   useEffect(() => {
-    const want = `#${state.tab}`;
-    if (location.hash !== want) {
-      try {
-        history.replaceState(null, "", want);
-      } catch {
-        /* ignorer */
-      }
+    save(state);
+    try {
+      history.replaceState(null, "", `${location.pathname}?${stateToQuery(state)}#${state.tab}`);
+    } catch {
+      /* ignorer */
     }
-  }, [state.tab]);
+  }, [state]);
 
   useEffect(() => {
     const onHash = () => {

@@ -4,6 +4,7 @@ import type { GeoInfo } from "../lib/geo";
 import { PERIOD_KEYS, PERIOD_LABEL, type PeriodKey } from "../lib/period";
 import type { AppState } from "../state/appState";
 import { Segmented } from "./ui";
+import { DEFAULT_GEO, isDefaultFilter } from "../state/appState";
 
 interface Props {
   ds: Dataset;
@@ -53,7 +54,7 @@ export function Filters({ ds, state, geo, update }: Props) {
       {ds.app.tops.map((t) => {
         const kids = childrenOf(ds, t);
         return [
-          <option key={t} value={t}>{tname(ds, t)} (alle)</option>,
+          <option key={t} value={t}>{tname(ds, t)}{kids.length ? " – alle" : ""}</option>,
           kids.length ? (
             <optgroup key={`${t}-g`} label={tname(ds, t)}>
               {kids.map((c) => <option key={c} value={c}>{tname(ds, c)}</option>)}
@@ -72,7 +73,7 @@ export function Filters({ ds, state, geo, update }: Props) {
           {!geoListed && <option value={state.geo}>{geo.label}</option>}
         </select>
       </label>
-      <label>Klasse
+      <label>Type hendelse
         <select value={state.cls} onChange={(e) => update({ cls: e.target.value })}>{clsOptions}</select>
       </label>
       <div className="field">
@@ -83,6 +84,11 @@ export function Filters({ ds, state, geo, update }: Props) {
           onChange={(period) => update({ period })}
         />
       </div>
+      {!isDefaultFilter(state) && (
+        <button type="button" className="reset" onClick={() => update({ geo: DEFAULT_GEO, cls: "*", period: "12m" })}>
+          Tilbake til Oslo, alle hendelser
+        </button>
+      )}
     </div>
   );
 }

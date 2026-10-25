@@ -51,6 +51,15 @@ export const areaRow = (ds: Dataset, a: number): AreaRow => ds.app.areas[a - 1];
 
 export const bydelName = (ds: Dataset, b: number): string => ds.app.bydeler[b - 1][1];
 
+/** "Sentrum" finnes både som bydel og som oppgitt sted; skill dem i alle lister. */
+export const areaLabel = (row: AreaRow): string => (row[1] === "sentrum" ? `${row[0]} (oppgitt sted)` : row[0]);
+
+export const bydelLabel = (ds: Dataset, b: number): string => {
+  if (!b) return "Uten bydel";
+  const name = bydelName(ds, b);
+  return name === "Sentrum" ? `${name} (bydel)` : name;
+};
+
 /** Månedens indeks, klemt inn i dataperioden. */
 export function monthIndex(ds: Dataset, m: string): number {
   const i = ds.months.indexOf(m);

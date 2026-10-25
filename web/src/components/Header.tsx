@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
 import type { Dataset } from "../data/dataset";
-import { fmtDate, fmtNum } from "../lib/format";
+import { fmtDate } from "../lib/format";
 import { TABS, type Tab } from "../state/appState";
 
 interface Props {
@@ -21,16 +21,14 @@ export function Header({ ds, tab, onTab }: Props) {
         <div className="brand"><h1>Politiloggen Analyse</h1><span className="sub">prototype</span></div>
         {ds && (
           <div className="status">
-            <span className="chip"><span className="dot" aria-hidden="true" />Sist lastet {fmtDate(ds.app.generated)}</span>
-            <span className="chip">{fmtNum(ds.n)} hendelser</span>
-            <span className="chip mono">{ds.app.classifier} · {ds.app.areaClassifier}</span>
+            <span className="chip"><span className="dot" aria-hidden="true" />Oppdatert {fmtDate(ds.app.span[1])}</span>
           </div>
         )}
       </div>
       {tab && (
         <nav className="tabs" aria-label="Visninger">
-          {TABS.map(([t, label]) => (
-            <a key={t} href={`#${t}`} aria-current={t === tab ? "page" : undefined} onClick={click(t)}>{label}</a>
+          {TABS.map((t) => (
+            <a key={t.id} href={`#${t.id}`} className={t.meta ? "meta" : undefined} aria-current={t.id === tab ? "page" : undefined} onClick={click(t.id)}>{t.label}</a>
           ))}
         </nav>
       )}

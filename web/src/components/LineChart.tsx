@@ -16,18 +16,22 @@ interface Props<P extends LinePoint> {
   partialLast?: boolean;
   /** Liten variant uten akser (small multiples). */
   mini?: boolean;
+  /** Stiplet sammenligningslinje (f.eks. samme måned året før); null hopper over punktet. */
+  compare?: (number | null)[] | null;
+  /** Prikk på siste punkt (av for sykliske serier som time og måned). */
+  endDot?: boolean;
   tip?: (p: P, i: number) => ReactNode;
 }
 
 /** Linjediagram med flate, trådkors og tooltip (mus og piltaster). */
-export function LineChart<P extends LinePoint>({ pts, ariaLabel, height = 240, partialLast = false, mini = false, tip }: Props<P>) {
+export function LineChart<P extends LinePoint>({ pts, ariaLabel, height = 240, partialLast = false, mini = false, compare = null, endDot = true, tip }: Props<P>) {
   const [ref, width] = useWidth<HTMLDivElement>(mini ? 200 : 600);
   const [active, setActive] = useState<number | null>(null);
   const tipApi = useTip();
 
   const W = Math.max(mini ? 120 : 260, width), H = mini ? 54 : height;
   const m = mini ? { l: 2, r: 6, t: 6, b: 4 } : { l: 44, r: 14, t: 12, b: 26 };
-  const max = nice(Math.max(1, ...pts.map((p) => p.v)));
+  const max = nice(Math.max(1, ...pts.map((p) => p.v), ...(compare ?? []).filter((v): v is number => v != null)));
   const span = W - m.l - m.r;
   const x = (i: number) => m.l + (pts.length < 2 ? 0 : (i * span) / (pts.length - 1));
   const y = (v: number) => m.t + (H - m.t - m.b) * (1 - v / max);
@@ -36,6 +40,17 @@ export function LineChart<P extends LinePoint>({ pts, ariaLabel, height = 240, p
   const line = solid.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
   const area = solid.length ? `${line}L${x(solid.length - 1)},${y(0)}L${x(0)},${y(0)}Z` : "";
   const li = solid.length - 1;
+  const cmpSegs: string[] = [];
+  if (compare) {
+    let cur: string[] = [];
+    compare.forEach((v, i) => {
+      if (v == null) {
+        if (cur.length) cmpSegs.push(cur.join("L"));
+        cur = [];
+      } else cur.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+    });
+    if (cur.length) cmpSegs.push(cur.join("L"));
+  }
 
   const ticks: ReactNode[] = [];
   if (!mini) {
@@ -91,6 +106,9 @@ export function LineChart<P extends LinePoint>({ pts, ariaLabel, height = 240, p
       >
         {ticks}
         <path d={area} style={{ fill: "var(--series-fill)" }} />
+        {cmpSegs.map((sg, i) => (
+          <path key={i} d={`M${sg}`} fill="none" style={{ stroke: "var(--muted)" }} strokeWidth={2} strokeDasharray="5 4" strokeLinecap="round" />
+        ))}
         <path d={line} fill="none" style={{ stroke: "var(--series)" }} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
         {partialLast && pts.length > 1 && (
           <path
@@ -98,7 +116,7 @@ export function LineChart<P extends LinePoint>({ pts, ariaLabel, height = 240, p
             style={{ stroke: "var(--series)" }} strokeWidth={2} strokeDasharray="3 3" fill="none"
           />
         )}
-        {li >= 0 && <circle cx={x(li)} cy={y(solid[li].v)} r={mini ? 3 : 4} style={{ fill: "var(--series)", stroke: "var(--surface)" }} strokeWidth={2} />}
+        {li >= 0 && endDot && <circle cx={x(li)} cy={y(solid[li].v)} r={mini ? 3 : 4} style={{ fill: "var(--series)", stroke: "var(--surface)" }} strokeWidth={2} />}
         {active != null && pts[active] && (
           <g pointerEvents="none">
             <line x1={x(active)} x2={x(active)} y1={m.t} y2={H - m.b} style={{ stroke: "var(--muted)" }} strokeWidth={1} strokeDasharray="2 3" />

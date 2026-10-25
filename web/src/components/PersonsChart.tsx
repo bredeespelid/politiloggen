@@ -79,7 +79,7 @@ export function PersonsChart({ counts, ages }: Props) {
                 </g>
               );
             })}
-            <text className="lbl" x={m.l + bw * i + bw / 2} y={H - 6} textAnchor="middle">{a.slice(0, 2)}</text>
+            <text className="lbl" x={m.l + bw * i + bw / 2} y={H - 6} textAnchor="middle">{`${a.slice(0, 2)}–${+a.slice(0, 2) + 9}`}</text>
           </g>
         ))}
       </svg>

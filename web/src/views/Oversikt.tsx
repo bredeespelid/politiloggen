@@ -1,82 +1,123 @@
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { BarList } from "../components/BarList";
 import { LineChart } from "../components/LineChart";
 import { PERSON_SERIES, PersonsChart } from "../components/PersonsChart";
 import { KpiRow, Panel, type KpiItem } from "../components/ui";
 import { childrenOf, tname, topOf } from "../data/dataset";
-import { kpiStats, monthlyTrend, outcomeItems, personCounts, subClassItems, topClassItems } from "../lib/aggregate";
-import { fmtNum, fmtPct, mlabel } from "../lib/format";
+import {
+  days, insights, kpiStats, monthlyTrend, nationalRate, outcomeStats, personStats, subClassItems, topClassItems, years,
+} from "../lib/aggregate";
+import { OUT_LABEL, fmt1, fmtNum, fmtPct, mlabel } from "../lib/format";
 import { ctx, type ViewProps } from "./types";
+
+/** **fet** i en tekststreng fra insights() blir <b>. */
+const Rich = ({ text }: { text: string }) => (
+  <>{text.split("**").map((part, i) => (i % 2 ? <b key={i}>{part}</b> : <Fragment key={i}>{part}</Fragment>))}</>
+);
 
 export default function Oversikt({ ds, sel, state, update }: ViewProps) {
   const cls = state.cls, top = topOf(ds, cls);
   const k = useMemo(() => kpiStats(sel), [sel]);
+  const natRate = useMemo(() => (k.pop && sel.geo.kind !== "all" ? nationalRate(sel) : 0), [sel, k.pop]);
+  const facts = useMemo(() => insights(sel), [sel]);
   const trend = useMemo(() => monthlyTrend(sel), [sel]);
   const classes = useMemo(() => (top === "*" ? topClassItems(sel) : subClassItems(sel, top)), [sel, top]);
-  const outcomes = useMemo(() => outcomeItems(sel), [sel]);
-  const persons = useMemo(() => personCounts(sel), [sel]);
+  const outcomes = useMemo(() => outcomeStats(sel, OUT_LABEL), [sel]);
+  const persons = useMemo(() => personStats(sel), [sel]);
 
-  const p = sel.period;
+  const p = sel.period, yrs = years(sel);
   const bigI = k.perTop.indexOf(Math.max(...k.perTop));
+  const popYear = ds.app.populationYear;
   const kpis: KpiItem[] = [
     { k: `${tname(ds, cls)} · ${p.label}`, v: fmtNum(k.n), d: sel.geo.label },
     {
       k: "Endring mot året før",
       v: k.change == null ? "–" : `${k.change > 0 ? "+" : ""}${fmtPct(k.change)}`,
-      d: p.prev ? `${fmtNum(k.prev ?? 0)} i perioden før` : "Ingen hel sammenligningsperiode",
+      d: p.prev ? `${fmtNum(k.prev ?? 0)} i perioden før` : p.noPrev ?? "Ingen hel sammenligningsperiode",
     },
     cls === "*"
-      ? { k: "Største klasse", v: k.tot ? tname(ds, ds.app.tops[bigI]) : "–", d: k.tot ? `${fmtPct(k.perTop[bigI] / k.tot)} av hendelsene` : "" }
-      : { k: "Andel av alle hendelser", v: k.tot ? fmtPct(k.n / k.tot) : "–", d: `av ${fmtNum(k.tot)} hendelser` },
-    cls === "*"
-      ? { k: "Hendelser per dag", v: fmtNum(Math.round((k.n / Math.max(1, k.months * 30.4)) * 10) / 10), d: "snitt i perioden" }
-      : { k: `${tname(ds, top)} utenfor politiets kategori`, v: k.inTop ? fmtPct(k.outside / k.inTop) : "–", d: `${fmtNum(k.outside)} av ${fmtNum(k.inTop)} · ${ds.app.classifier}` },
+      ? { k: "Største type", v: k.tot ? tname(ds, ds.app.tops[bigI]) : "–", d: k.tot ? `${fmtPct(k.perTop[bigI] / k.tot)} av hendelsene` : "" }
+      : top === "vold"
+        ? { k: "Registrert av politiet under annen kategori", v: k.n ? fmtPct(k.outside / k.n) : "–", d: `${fmtNum(k.outside)} av ${fmtNum(k.n)}, f.eks. kniv meldt som «Ro og orden»` }
+        : { k: "Andel av alle hendelser", v: k.tot ? fmtPct(k.n / k.tot) : "–", d: `av ${fmtNum(k.tot)} hendelser` },
+    k.pop
+      ? {
+        k: "Per 1 000 innbyggere per år", v: fmt1(k.n / yrs / k.pop * 1000),
+        d: sel.geo.kind === "all" ? `${fmtNum(k.pop)} innbyggere (SSB ${popYear})` : `Hele landet: ${fmt1(natRate)} · SSB ${popYear}`,
+      }
+      : { k: "Hendelser per dag", v: fmt1(k.n / days(sel)), d: "snitt i perioden" },
   ];
 
   const pts = trend.pts.map((x) => ({ ...x, label: mlabel(x.m) }));
   const hasKids = top !== "*" && childrenOf(ds, top).length > 0;
+  const personsEnough = persons.total >= 10;
 
   return (
     <div className="grid">
       <KpiRow items={kpis} label="Nøkkeltall" />
+      <Panel span={12} id="insights-title" title="Nøkkelfunn" className="insights-panel">
+        <ul className="insights">{facts.map((t) => <li key={t}><Rich text={t} /></li>)}</ul>
+      </Panel>
       <Panel span={8} id="trend-title" title={`${tname(ds, cls)} per måned`}
         lede={`${ctx(sel)}.${trend.partialLast ? " Siste måned er ikke komplett (stiplet)." : ""}`}>
+        <div className="legend">
+          <span><span className="sw" style={{ background: "var(--series)" }} />{p.label}</span>
+          {trend.hasCompare && <span><span className="sw dash" />Samme måned året før</span>}
+        </div>
         <LineChart
-          pts={pts} partialLast={trend.partialLast}
+          pts={pts} partialLast={trend.partialLast} compare={trend.hasCompare ? trend.pts.map((x) => x.pv) : null}
           ariaLabel={`${tname(ds, cls)} per måned, ${ctx(sel)}`}
           tip={(pt) => (
             <>
               <b>{pt.label}</b><br />{fmtNum(pt.v)} hendelser
-              {cls !== "*" && <><br />{fmtPct(pt.v / Math.max(1, pt.t))} av alle</>}
+              {pt.pv != null && <><br />Året før: {fmtNum(pt.pv)}</>}
+              {cls !== "*" && <><br />{fmtPct(pt.v / Math.max(1, pt.t))} av alle hendelser</>}
               {pt.m === ds.last && <><br /><i>delvis måned</i></>}
             </>
           )}
         />
       </Panel>
       <Panel span={4} id="sub-title"
-        title={top === "*" ? "Klasser" : `Underklasser · ${tname(ds, top)}`}
-        lede={top === "*" ? "Vår inndeling i overklasser. Klikk for å velge." : "Én hendelse kan få flere underklasser, f.eks. ran med kniv."}>
+        title={top === "*" ? "Typer hendelser" : (
+          <>
+            Typer {tname(ds, top).toLowerCase()}{" "}
+            <button type="button" className="back" onClick={() => update({ cls: "*" })}>← Alle typer</button>
+          </>
+        )}
+        lede={top === "*"
+          ? "Klikk for å se nærmere på én type. En hendelse kan telle i flere typer."
+          : "En hendelse kan telle i flere typer (f.eks. ran med kniv), så summen kan bli større enn totalen. Klikk for å velge."}>
         {top !== "*" && !hasKids ? (
           <p className="note">{tname(ds, top)} har ingen underklasser ennå.</p>
         ) : (
           <BarList
-            items={classes} label={top === "*" ? "Overklasser" : "Underklasser"}
+            items={classes} label={top === "*" ? "Typer hendelser" : "Undertyper"}
             onSelect={(i) => update({ cls: top === "*" ? i.code : i.code === cls ? top : i.code })}
             tip={(i) => <><b>{i.label}</b><br />{fmtNum(i.v)}<br /><i>{i.sel ? "Klikk for å fjerne valget" : "Klikk for å velge"}</i></>}
           />
         )}
       </Panel>
-      <Panel span={6} id="outcomes-title" title="Utfall" lede="Hentet fra teksten: hva politiet gjorde.">
-        <BarList items={outcomes} label="Utfall"
-          tip={(i) => <><b>{i.label}</b><br />{fmtNum(i.v)} hendelser · {tname(ds, cls)}</>} />
+      <Panel span={6} id="outcomes-title" title="Hva politiet gjorde"
+        lede={`Hentet fra teksten: hva politiet gjorde. ${fmtNum(outcomes.any)} av ${fmtNum(outcomes.n)} hendelser (${fmtPct(outcomes.n ? outcomes.any / outcomes.n : 0)}) nevner et utfall.`}>
+        <BarList items={outcomes.items} label="Hva politiet gjorde"
+          tip={(i) => <><b>{i.label}</b><br />{fmtNum(i.v)} hendelser · {fmtPct(outcomes.n ? i.v / outcomes.n : 0)} av alle i utvalget</>} />
       </Panel>
       <Panel span={6} id="persons-title" title="Hvem er omtalt"
         lede="Kjønn og aldersgruppe der teksten nevner det, f.eks. «mann i 20-årene».">
-        <div className="legend">
-          {PERSON_SERIES.map((s) => <span key={s.name}><span className="sw" style={{ background: s.color }} />{s.name}</span>)}
-        </div>
-        <PersonsChart counts={persons} ages={ds.app.ages} />
-        <p className="note">Aldersgruppe (10 = 10-årene). {ctx(sel)}.</p>
+        {personsEnough ? (
+          <>
+            <div className="legend">
+              {PERSON_SERIES.map((s) => <span key={s.name}><span className="sw" style={{ background: s.color }} />{s.name}</span>)}
+            </div>
+            <PersonsChart counts={persons.counts} ages={ds.app.ages} />
+            <p className="note">
+              Alder i år. {fmtNum(persons.total)} omtalte personer i {fmtNum(persons.withP)} av {fmtNum(persons.nInc)} hendelser
+              ({fmtPct(persons.nInc ? persons.withP / persons.nInc : 0)}) – de fleste meldinger nevner ikke alder og kjønn.
+            </p>
+          </>
+        ) : (
+          <p className="note">Bare {fmtNum(persons.total)} personer er omtalt med kjønn og alder i utvalget – for få til å vise en fordeling. Prøv et større område eller en lengre periode.</p>
+        )}
       </Panel>
     </div>
   );

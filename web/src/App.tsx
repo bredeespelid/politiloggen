@@ -1,11 +1,12 @@
 import { lazy, Suspense, useEffect, useMemo, type ComponentType } from "react";
 import { Filters } from "./components/Filters";
 import { Header } from "./components/Header";
+import { Intro } from "./components/Intro";
 import { TipProvider, useTip } from "./components/Tooltip";
 import type { Dataset } from "./data/dataset";
 import { DATA_URL, useAppData } from "./data/load";
 import { makeSelection } from "./lib/aggregate";
-import { fmtDate } from "./lib/format";
+import { fmtDate, fmtNum } from "./lib/format";
 import { geoInfo, geoMask } from "./lib/geo";
 import { useColorScheme } from "./lib/hooks";
 import { periodInfo } from "./lib/period";
@@ -80,7 +81,7 @@ function Dashboard({ ds }: { ds: Dataset }) {
 
   useEffect(() => tip.hide(), [tip, sel, state.tab, state.dmode]);
   useEffect(() => {
-    const label = TABS.find(([t]) => t === state.tab)?.[1];
+    const label = TABS.find((t) => t.id === state.tab)?.label;
     document.title = `${label} · Politiloggen Analyse`;
   }, [state.tab]);
 
@@ -90,14 +91,19 @@ function Dashboard({ ds }: { ds: Dataset }) {
       <a className="skip" href="#main">Hopp til innhold</a>
       <Header ds={ds} tab={state.tab} onTab={(tab) => update({ tab })} />
       <main id="main" tabIndex={-1}>
-        {state.tab !== "datamodell" && <Filters ds={ds} state={state} geo={geo} update={update} />}
+        {state.tab !== "datamodell" && (
+          <>
+            <Intro />
+            <Filters ds={ds} state={state} geo={geo} update={update} />
+          </>
+        )}
         <Suspense fallback={<div className="state-box" role="status"><span className="spinner" aria-hidden="true" /><p>Laster kart …</p></div>}>
           <View ds={ds} state={state} update={update} sel={sel} scheme={scheme} />
         </Suspense>
       </main>
       <footer>
         <span>Kilde: Politiet – <a href="https://www.politiet.no/politiloggen" target="_blank" rel="noopener">www.politiet.no/politiloggen</a> (NLOD 2.0) · Kart og stedsnavn: Kartverket</span>
-        <span>Data {fmtDate(ds.app.span[0])} – {fmtDate(ds.app.span[1])}</span>
+        <span>Databasen: {fmtNum(ds.n)} hendelser fra {fmtDate(ds.app.span[0])} til {fmtDate(ds.app.span[1])}. Klassifisering {ds.app.classifier}, steder {ds.app.areaClassifier}.</span>
         <span>Politiloggen viser det operasjonssentralene publiserer. Det er ikke kriminalstatistikk.</span>
       </footer>
     </>

@@ -47,6 +47,21 @@ export function geoInfo(ds: Dataset, g: GeoKey): GeoInfo {
   return { kind, b, id: mid, k, label: `${name} (${muniName(ds, k)})`, hasBydel: true };
 }
 
+/**
+ * Folketall (SSB) for valgt område. null for bydeler (folketall finnes ikke, og
+ * sentrum har få beboere) og når kommunen mangler folketall.
+ */
+export function geoPop(ds: Dataset, g: Pick<GeoInfo, "kind" | "k" | "i">): number | null {
+  const { munis, districts } = ds.app;
+  if (g.kind === "m") return munis[(g.k ?? 0) - 1]?.[4] || null;
+  if (g.kind === "d") {
+    const id = String(districts[g.i ?? 0][0]);
+    return munis.filter((m) => String(m[2]) === id).reduce((s, m) => s + (m[4] || 0), 0) || null;
+  }
+  if (g.kind === "all") return munis.reduce((s, m) => s + (m[4] || 0), 0) || null;
+  return null;
+}
+
 /** 1 for hendelser i valgt område, ellers 0. */
 export function geoMask(ds: Dataset, g: GeoInfo): Uint8Array {
   const mask = new Uint8Array(ds.n);

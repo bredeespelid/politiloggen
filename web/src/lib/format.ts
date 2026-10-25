@@ -26,10 +26,25 @@ export const CAT_TO_TOP: Record<string, string> = {
   Innbrudd: "vinning", Skadeverk: "vinning", Ulykke: "ulykke", Redning: "ulykke", "Sjø": "ulykke", Savnet: "savnet",
 };
 
-/** Avrunder opp til en "pen" akseverdi (1, 2, 2,5, 5, 10 × 10^n). */
+export const MONTH_FULL = ["januar", "februar", "mars", "april", "mai", "juni", "juli", "august", "september", "oktober", "november", "desember"];
+
+export const OUT_LABEL: Record<string, string> = {
+  "pågrepet": "Pågrepet", anmeldt: "Anmeldt", innbrakt: "Innbrakt (tatt med til politiet)", bortvist: "Bortvist",
+  "førerkortbeslag": "Førerkort beslaglagt", forelegg: "Bot (forelegg)",
+};
+
+export const cap1 = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Én desimal: 5,6 */
+export const fmt1 = (v: number): string => NF.format(Math.round(v * 10) / 10);
+
+/**
+ * Toppen av y-aksen: fire like trinn der hvert trinn er et helt «pent» tall (1, 2, 5 × 10^n),
+ * så akseetikettene blir heltall.
+ */
 export function nice(max: number): number {
-  if (max <= 0) return 1;
-  const p = 10 ** Math.floor(Math.log10(max));
-  const f = max / p;
-  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+  const raw = Math.max(1, max) / 4;
+  const p = 10 ** Math.floor(Math.log10(raw)), f = raw / p;
+  const step = Math.max(1, (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p);
+  return step * 4;
 }

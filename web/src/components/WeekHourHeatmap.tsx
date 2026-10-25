@@ -8,8 +8,8 @@ interface Props {
   tot: number;
 }
 
-/** Trinn i fargeskalaen (kvadratrot, så få hendelser fortsatt synes). */
-export const heatStep = (v: number, max: number): number => (v === 0 ? 0 : Math.min(7, 1 + Math.floor(Math.sqrt(v / max) * 6.999)));
+/** Trinn i fargeskalaen (lineær). */
+export const heatStep = (v: number, max: number): number => (v === 0 ? 0 : Math.min(7, 1 + Math.floor((v / max) * 6.999)));
 
 /** Varmekart ukedag × time. Piltaster flytter mellom cellene. */
 export function WeekHourHeatmap({ grid, tot }: Props) {

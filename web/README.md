@@ -34,6 +34,19 @@ python3 scripts/build_db.py && python3 scripts/geocode.py && python3 scripts/bui
 
 Hvis filen mangler, viser appen en feilmelding med kommandoen over.
 
+## Lenker til et utvalg
+
+Filtrene ligger i adressen, så et utvalg kan deles:
+
+```
+/?geo=b:0301|Grünerløkka&cls=vold&p=2025#fordeling
+```
+
+`geo` er `all`, `d:<distrikts-id>`, `m:<kommunenr>` eller `b:<kommunenr>|<bydel>`. `cls` er en
+klassekode (`vold`, `vold.kniv`, …) eller `*`. `p` er `12m`, `2025`, `2024` eller `alle`.
+Valgfritt: `dm` (`pop`, `share`, `abs`), `mv` (`geo`, `norge`), `mk` (`heat`, `dots`) og `q` (søk i Hendelser).
+Ugyldige verdier byttes ut med standardvalget (Oslo, alle hendelser, siste 12 hele måneder).
+
 ## Kommandoer
 
 | Kommando            | Hva den gjør                                      |
@@ -49,10 +62,13 @@ Hvis filen mangler, viser appen en feilmelding med kommandoen over.
 src/
   data/        typer for app.json, dekoding av hendelsesrader, oppslag og lasting
   lib/         aggregeringer (rene funksjoner), perioder, områdefilter, formatering, hooks
-  state/       filtertilstand (lagres i localStorage under «pl-state-v2», fanen følger #hash)
+  state/       filtertilstand: adressen (?geo=…&cls=…&p=…) går foran localStorage («pl-state-v2»),
+               fanen følger #hash
   components/  diagrammer (linje, søyler, personer, varmekart, krysstabell), filtre, tooltip
-  views/       én fil per fane: Oversikt, Kart, Fordeling, Områder, Tidsmønster,
-               Klassifisering, Hendelser, Datamodell
+  views/       én fil per fane: Oversikt, Kart, Fordeling, Når (Tidsmønster), Steder (Områder),
+               Hendelser, Om klassifiseringen (Klassifisering), Datamodell
+  map/         Leaflet-oppsett (fliser, attribusjon) og bydelsetiketter. Kartet er isolert her
+               og i views/Kart.tsx, og lastes først når fanen åpnes
 test/          tester for dekoderen og aggregeringene, med et lite syntetisk datasett
 ```
 

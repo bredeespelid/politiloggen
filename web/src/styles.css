@@ -238,3 +238,39 @@ td.wrap { white-space: normal; }
 .leaflet-control-attribution.leaflet-control { background: color-mix(in srgb, var(--surface) 85%, transparent); color: var(--ink-2); }
 .leaflet-control-attribution a { color: var(--link); }
 .leaflet-tooltip.place { color: var(--ink); text-shadow: 0 0 3px var(--surface), 0 0 3px var(--surface), 0 0 2px var(--surface); }
+
+/* ---------- Fra den oppdaterte prototypen ---------- */
+.leaflet-tooltip.bydel { background: transparent; border: 0; box-shadow: none; padding: 0; color: var(--muted); font: 700 11px/1 var(--font-body); letter-spacing: .08em; text-transform: uppercase; text-shadow: 0 0 3px var(--land), 0 0 3px var(--land), 0 0 6px var(--land); }
+.leaflet-tooltip.bydel:before { display: none; }
+.search { display: grid; gap: 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; max-width: 420px; }
+.search input { font: 400 15px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--ink-2); border-radius: 2px; padding: 8px 10px; text-transform: none; letter-spacing: 0; }
+.search input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.back { font: 600 12px var(--font-body); color: var(--link); background: none; border: 0; padding: 0 0 0 8px; cursor: pointer; text-decoration: underline; vertical-align: 2px; }
+@media (max-width: 600px) { .hide-sm { display: none; } .filters label { width: 100%; } .filters select { width: 100%; } }
+nav.tabs { mask-image: linear-gradient(90deg, #000 85%, transparent); -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); }
+@media (min-width: 900px) { nav.tabs { mask-image: none; -webkit-mask-image: none; } }
+.tree summary { list-style: none; }
+.tree summary::-webkit-details-marker { display: none; }
+.tree summary > span:first-child::before { content: "▸"; display: inline-block; width: 1em; color: var(--muted); transition: transform .15s; }
+.tree details[open] summary > span:first-child::before { transform: rotate(90deg); }
+.item p.update { font-size: 13px; color: var(--muted); border-left: 2px solid var(--line); padding-left: 10px; }
+.item p.update b { color: var(--ink-2); font-weight: 600; }
+tr.drill { cursor: pointer; }
+tr.drill:hover td, tr.drill:focus-visible td { background: var(--surface-2); }
+tr.drill:focus-visible { outline: 2px solid var(--accent); }
+.map-ctrls { display: flex; flex-wrap: wrap; gap: 8px; }
+.intro { display: grid; gap: 6px; max-width: 90ch; }
+.intro p { margin: 0; color: var(--ink-2); font-size: 15px; }
+.intro details summary { cursor: pointer; color: var(--link); font-weight: 600; font-size: 14px; width: fit-content; }
+.intro details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.glossary { display: grid; grid-template-columns: minmax(120px, max-content) 1fr; gap: 6px 16px; margin: 10px 0 4px; padding: 12px 14px; background: var(--surface-2); border-left: 3px solid var(--accent); font-size: 13px; }
+.glossary dt { font-weight: 700; } .glossary dd { margin: 0; color: var(--ink-2); }
+@media (max-width: 600px) { .glossary { grid-template-columns: 1fr; } .glossary dd { margin-bottom: 6px; } }
+.reset { font: 600 13px var(--font-body); color: var(--link); background: none; border: 0; padding: 8px 4px; cursor: pointer; text-decoration: underline; }
+.reset:focus-visible, .back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.insights-panel { border-left: 4px solid var(--accent); }
+.insights { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 15px; line-height: 1.5; max-width: 95ch; }
+.insights b { color: var(--accent); }
+.sw.dash { background: none; border-top: 2px dashed var(--muted); height: 0; width: 14px; vertical-align: 3px; border-radius: 0; }
+nav.tabs a.meta { margin-left: auto; }
+@media (max-width: 700px) { nav.tabs a.meta { margin-left: 0; } }

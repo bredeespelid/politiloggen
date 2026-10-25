@@ -25,7 +25,10 @@ export interface Sample {
   created: string;
   messages: number;
   active: boolean;
+  /** første melding */
   text: string;
+  /** siste melding, når den er en annen enn den første */
+  update?: string | null;
   classes: string[];
   weapon: string | null;
   outcome: string[];
@@ -57,8 +60,8 @@ export interface Kommune {
 /** [navn, type, bydel, lat, lon, kommuneindeks, nøkkel] */
 export type AreaRow = [string, string, string | null, number | null, number | null, number, string];
 
-/** [kommunenr, navn, distrikts-id, antall hendelser] */
-export type MuniRow = [string, string, number, number];
+/** [kommunenr, navn, distrikts-id, antall hendelser, folketall (SSB) eller null] */
+export type MuniRow = [string, string, number, number, (number | null)?];
 
 export interface AppData {
   generated: string;
@@ -74,6 +77,8 @@ export interface AppData {
   /** [distrikts-id, navn] */
   districts: [number, string][];
   munis: MuniRow[];
+  /** året folketallene i munis gjelder */
+  populationYear?: string;
   categories: string[];
   areaTypes: string[];
   outcomes: string[];
