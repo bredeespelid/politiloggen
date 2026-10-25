@@ -14,4 +14,4 @@ export const TILE_URL = "https://cache.kartverket.no/v1/wmts/1.0.0/topograatone/
 
 /** Kildelinje nederst i kartet. Bydelsgrensene (OSM) nevnes bare når de er med i datafilen. */
 export const mapAttribution = (withBydel: boolean): string =>
-  ["Data: Politiet", "Grenser: Kartverket", "Kart: © Kartverket", ...(withBydel ? ["Bydelsgrenser: © OpenStreetMap-bidragsytere"] : [])].join(" · ");
+  ["Data: Politiet", "© Kartverket", ...(withBydel ? ["bydeler © OpenStreetMap"] : [])].join(" · ");

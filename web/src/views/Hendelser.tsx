@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import { Panel } from "../components/ui";
 import { bydelName, tname } from "../data/dataset";
-import { filterSamples } from "../lib/aggregate";
-import { fmtDate, mlabel } from "../lib/format";
+import { eventCount, filterSamples } from "../lib/aggregate";
+import { fmtDate, fmtNum } from "../lib/format";
 import type { ViewProps } from "./types";
 
 const SHOW = 60;
@@ -11,11 +11,11 @@ export default function Hendelser({ ds, sel, state, update }: ViewProps) {
   const { geo, period: p } = sel;
   const items = useMemo(() => filterSamples(ds, geo, state.cls, state.q, p), [ds, geo, state.cls, state.q, p]);
   const q = state.q.trim().toLowerCase();
-  const periodText = p.key === "12m" ? `${mlabel(p.from)} – i dag` : p.label;
+  const all = useMemo(() => eventCount(sel), [sel]);
   return (
     <div className="grid">
       <Panel span={12} id="feed-title" title="Siste hendelser (utvalg)"
-        lede={`${items.length} hendelser vises (${tname(ds, state.cls)}, ${geo.label}, ${periodText}${q ? `, søk «${q}»` : ""}). Dette er et utvalg – de siste hendelsene nasjonalt og de siste 80 i hver av de 24 største kommunene. Tallene i de andre fanene bygger på alle hendelser.`}>
+        lede={`Viser ${fmtNum(items.length)} av ${fmtNum(all)} hendelser (${tname(ds, state.cls)}, ${geo.label}, ${p.label}${q ? `, søk «${q}»` : ""}). Utvalget er de nyeste hendelsene per kommune og sted, så eldre hendelser mangler. Tallene i de andre fanene bygger på alle hendelser.`}>
         <label className="search">Søk i teksten
           <input type="search" value={state.q} placeholder="F.eks. kniv, Grønland, promille" autoComplete="off"
             onChange={(e) => update({ q: e.target.value })} />

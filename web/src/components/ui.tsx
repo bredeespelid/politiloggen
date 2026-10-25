@@ -24,7 +24,8 @@ export function KpiRow({ items, label }: { items: KpiItem[]; label: string }) {
 interface SegProps<T extends string> {
   label: string;
   value: T;
-  options: readonly (readonly [T, string])[];
+  /** [verdi, tekst, hjelpetekst (title)?] */
+  options: readonly (readonly [T, string, string?])[];
   onChange: (v: T) => void;
 }
 
@@ -32,8 +33,8 @@ interface SegProps<T extends string> {
 export function Segmented<T extends string>({ label, value, options, onChange }: SegProps<T>) {
   return (
     <div className="seg" role="group" aria-label={label}>
-      {options.map(([v, text]) => (
-        <button key={v} type="button" aria-pressed={v === value} onClick={() => onChange(v)}>{text}</button>
+      {options.map(([v, text, title]) => (
+        <button key={v} type="button" title={title} aria-pressed={v === value} onClick={() => onChange(v)}>{text}</button>
       ))}
     </div>
   );

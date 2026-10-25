@@ -1,19 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { buildDataset } from "../src/data/dataset";
 import {
-  areaStats, crossTab, days, distribution, filterSamples, insights, kpiStats, makeSelection, mapPoints, monthlyTrend,
+  areaStats, crossTab, days, distribution, distributionTexts, eventCount, filterSamples, insights, kpiStats, makeSelection, mapPoints, monthlyTrend,
   nationalRate, outcomeStats, personStats, seasonStats, weekHourGrid,
 } from "../src/lib/aggregate";
 import { nice } from "../src/lib/format";
 import { geoInfo, geoMask, geoPop } from "../src/lib/geo";
-import { periodInfo, type PeriodKey } from "../src/lib/period";
-import { makeFixture } from "./fixture";
+import { periodInfo, periodYears, type PeriodKey } from "../src/lib/period";
+import { makeFixture, RECS } from "./fixture";
 
 const ds = buildDataset(makeFixture());
-const sel = (geo: string, cls = "*", period: PeriodKey = "alle") => {
-  const g = geoInfo(ds, geo);
-  return makeSelection(ds, g, geoMask(ds, g), cls, periodInfo(period, ds.first, ds.last));
+const sel2 = (d: typeof ds, geo: string, cls = "*", period: PeriodKey = "alle") => {
+  const g = geoInfo(d, geo);
+  return makeSelection(d, g, geoMask(d, g), cls, periodInfo(period, d.first, d.last));
 };
+const sel = (geo: string, cls = "*", period: PeriodKey = "alle") => sel2(ds, geo, cls, period);
+const years = (s: ReturnType<typeof sel>) => periodYears(s.period, s.ds.app.span);
 
 describe("geo og periode", () => {
   it("maskerer kommune, distrikt og bydel", () => {
@@ -104,24 +106,53 @@ describe("distribution", () => {
     expect(d.mode).toBe("abs");
     expect(d.items.map((i) => [i.label, i.v, i.none])).toEqual([["Oslo", 4, false], ["Vest", 2, false]]);
   });
-  it("per innbygger er standard der folketall finnes, og andel mangler uten klassefilter", () => {
-    const all = distribution(sel("all"), "pop");
+  it("per innbygger er standard der folketall finnes, når noen enhet har nok hendelser", () => {
+    const many = Array.from({ length: 12 }, () => ({ ...RECS[0], district: 0, muni: 1 }));
+    const d2 = buildDataset(makeFixture([...many, RECS[4]]));
+    const all = distribution(sel2(d2, "all"), "pop");
     expect(all.modes).toEqual(["pop", "abs"]);
     expect(all.mode).toBe("pop");
+    expect(all.autoAbs).toBe(false);
     const oslo = all.items.find((i) => i.label === "Oslo")!;
-    expect(oslo.v).toBeCloseTo((4 / (76 / 365.25) / 700000) * 1000, 6);
+    expect(oslo.v).toBeCloseTo((12 / years(sel2(d2, "all")) / 700000) * 1000, 6);
+    // Vest har bare 1 hendelse: lavt grunnlag, nederst
+    expect(all.items.map((i) => [i.label, i.low])).toEqual([["Oslo", false], ["Vest", true]]);
     // ber om andel uten klassefilter: faller tilbake til første tilgjengelige mål
-    expect(distribution(sel("all"), "share").mode).toBe("pop");
+    expect(distribution(sel2(d2, "all"), "share").mode).toBe("pop");
   });
-  it("viser bydeler med «uten bydel» sist og merker lavt grunnlag", () => {
+  it("bytter til antall når ingen enhet har 10 hendelser, og forklarer det", () => {
+    const s = sel("all");
+    const d = distribution(s, "pop");
+    expect(d).toMatchObject({ mode: "abs", autoAbs: true });
+    expect(d.items.every((i) => !i.low)).toBe(true);
+    const t = distributionTexts(s, d, 7.5);
+    expect(t.note).toContain("Viser antall, fordi ingen områder har 10 hendelser eller flere av denne typen.");
+    expect(t.lede).toBe("Alle hendelser, des 24 – feb 25. Antall hendelser.");
+  });
+  it("forklarer målet i ledeteksten og nevner manglende per-innbygger-tall", () => {
+    const many = Array.from({ length: 12 }, () => ({ ...RECS[0], bydel: 1, muni: 1 }));
+    const d2 = buildDataset(makeFixture(many));
+    const s = sel2(d2, "m:0301", "vold");
+    const d = distribution(s, "share");
+    expect(d.mode).toBe("share");
+    const t = distributionTexts(s, d, 7.5);
+    expect(t.lede).toContain("Hver søyle viser hvor stor andel av områdets hendelser som er vold. Områder med under 10 slike hendelser står nederst.");
+    expect(t.note).toContain("Per innbygger er ikke tilgjengelig her, fordi folketall finnes bare for kommuner og distrikter.");
+    const pop = distributionTexts(sel2(d2, "d:201", "vold"), distribution(sel2(d2, "d:201", "vold"), "pop"), 7.5);
+    expect(pop.note).toContain("Distriktene publiserer ulikt mye, så rater er ikke direkte sammenlignbare.");
+  });
+  it("viser bydeler med «uten bydel» sist, og teller de manglende fra alle nøkler", () => {
     const d = distribution(sel("m:0301", "vold"), "share");
     expect(d.level.title).toBe("Bydeler i Oslo");
     expect(d.modes).toEqual(["share", "abs"]);
+    expect(d.autoAbs).toBe(true);
     expect(d.items.map((i) => [i.k, i.n, i.t])).toEqual([[1, 2, 2], [2, 0, 1], [0, 1, 1]]);
     expect(d.items[2]).toMatchObject({ none: true, dim: true, low: false });
-    expect(d.items[0].low).toBe(true);
     expect(d.series.get(1)).toEqual([1, 1, 0]);
-    expect(d.unplaced).toBe(1);
+    expect([d.missingN, d.totalN]).toEqual([1, 3]);
+    const note = distributionTexts(sel("m:0301", "vold"), d, 0).note;
+    expect(note).toContain("1 hendelse (");
+    expect(note).toContain("av 3) er uten bydel.");
   });
 });
 
@@ -161,6 +192,14 @@ describe("øvrige aggregeringer", () => {
     expect(out[0]).toBe("**6** hendelser i hele landet i perioden.");
     expect(out.some((t) => t.startsWith("Mest aktivt på"))).toBe(true);
     expect(insights(sel("b:0301|Sagene", "vold"))).toEqual(["Ingen hendelser med vold i Sagene (Oslo) i perioden."]);
+  });
+});
+
+describe("eventCount", () => {
+  it("teller alle hendelser av valgt type i området og perioden", () => {
+    expect(eventCount(sel("all"))).toBe(6);
+    expect(eventCount(sel("m:0301", "vold"))).toBe(3);
+    expect(eventCount(sel("all", "*", "2025"))).toBe(4);
   });
 });
 

@@ -6,7 +6,7 @@ import {
   areaLabel, areaRow, bydelLabel, childrenOf, dname, monthIndex, muniName, tname, topOf, type Dataset,
 } from "../data/dataset";
 import type { AreaRow, Sample } from "../data/types";
-import { CAT_TO_TOP, WD, cap1 } from "./format";
+import { CAT_TO_TOP, NF, PF, WD, cap1, fmt1 } from "./format";
 import { geoInfo, geoMask, geoPop, mapMask, type GeoInfo } from "./geo";
 import { periodDays, periodYears, shiftMonth, type PeriodInfo } from "./period";
 
@@ -165,7 +165,7 @@ export function topClassItems(sel: Selection): (BarItem & { code: string })[] {
   const { ds } = sel;
   const nTops = ds.app.tops.length, cnt = new Array<number>(nTops).fill(0), T = ds.col.tops;
   scan(sel, (r) => countBits(T[r], nTops, cnt));
-  return ds.app.tops.map((c, i) => ({ key: c, code: c, label: tname(ds, c), v: cnt[i] })).sort((a, b) => b.v - a.v);
+  return ds.app.tops.map((c, i) => ({ key: c, code: c, label: tname(ds, c), v: cnt[i] })).filter((i) => i.v > 0).sort((a, b) => b.v - a.v);
 }
 
 /** Underklasser i en overklasse (uten klassefilter), sortert synkende. Valgt klasse vises også uten treff. */
@@ -251,7 +251,7 @@ export interface Level {
   label: (k: number) => string;
   /** Områdenøkkel for å velge nivået, eller null. */
   geo: (k: number) => string | null;
-  /** Samlebøtten (ukjent kommune / uten bydel / øvrige). Distriktsindeks 0 er et ekte distrikt. */
+  /** Samlebøtter (ukjent kommune, uten bydel, uten sted, sjeldne steder). Distriktsindeks 0 er et ekte distrikt. */
   none: (k: number) => boolean;
   /** Folketall for enheten, hvis det finnes for dette nivået. */
   pop?: (k: number) => number | null;
@@ -259,6 +259,10 @@ export interface Level {
   note?: string;
   /** Nivået er steder (da heter samlebøtten «uten oppgitt sted», ellers «uten bydel»). */
   places?: boolean;
+  /** Hvilke nøkler som teller som «mangler» i merknaden (steder: bare 0 = ikke oppgitt sted). */
+  missing?: (k: number) => boolean;
+  /** Ordlyd i merknaden: «<n hendelser> … ». */
+  missingText?: string;
 }
 
 export function childLevel(ds: Dataset, g: GeoInfo, flevel: FLevel = "bydel"): Level {
@@ -275,6 +279,7 @@ export function childLevel(ds: Dataset, g: GeoInfo, flevel: FLevel = "bydel"): L
     return {
       ...base, title: `Kommuner i ${g.label}`, key: (r) => col.muni[r], label: (k) => muniName(ds, k),
       geo: (k) => (k ? `m:${app.munis[k - 1][0]}` : null), pop: (k) => (k ? app.munis[k - 1][4] ?? null : null), limit: 15,
+      missingText: "har ukjent kommune",
     };
   }
   if (g.kind === "a") {
@@ -283,13 +288,16 @@ export function childLevel(ds: Dataset, g: GeoInfo, flevel: FLevel = "bydel"): L
   if (g.kind === "m" && g.hasBydel && flevel !== "sted") {
     return {
       ...base, title: `Bydeler i ${g.label}`, key: (r) => col.bydel[r], label: (k) => bydelLabel(ds, k),
-      geo: (k) => (k ? `b:${app.bydeler[k - 1].join("|")}` : null), limit: 20,
+      geo: (k) => (k ? `b:${app.bydeler[k - 1].join("|")}` : null), limit: 20, missingText: "er uten bydel",
       note: "«Uten bydel» er veier og tunneler (E6, E18, Ring 3), hendelser uten oppgitt sted og steder som ennå ikke er knyttet til bydel. Bydelstallene er derfor et minimum.",
     };
   }
   return {
-    ...base, title: `Steder i ${g.label}`, key: (r) => col.area[r], label: (k) => (k ? areaLabel(areaRow(ds, k)) : "Uten oppgitt sted"),
-    geo: (k) => (k ? `a:${k}` : null), limit: 15, places: true,
+    // 0 = hendelsen har ikke oppgitt sted; -1 = har sted, men et sjeldent navn som ikke har egen rad.
+    ...base, title: `Steder i ${g.label}`,
+    key: (r) => col.area[r] || (app.areaTypes[col.areaType[r]] === "mangler" ? 0 : -1),
+    label: (k) => (k > 0 ? areaLabel(areaRow(ds, k)) : k === 0 ? "Uten oppgitt sted" : "Øvrige steder (sjeldne navn)"),
+    geo: (k) => (k > 0 ? `a:${k}` : null), limit: 15, places: true, none: (k) => k <= 0, missing: (k) => k === 0, missingText: "har ikke oppgitt sted",
     note: "Steder er stedsnavnene politiet oppgir (strøk, gater, sentrum), vasket og samlet. Klikk et sted for å se bare det.",
   };
 }
@@ -323,10 +331,12 @@ export interface Distribution {
   months: string[];
   partialLast: boolean;
   years: number;
-  /** hendelser uten bydel/sted, og summen av enhetene som vises */
-  unplaced: number | null;
-  total: number;
+  /** hendelser uten bydel/sted og alle hendelser av valgt type, regnet over alle nøkler (ikke bare de som vises) */
+  missingN: number;
+  totalN: number;
   hasLow: boolean;
+  /** Andel og rate ble byttet ut med antall fordi ingen enhet har nok hendelser. */
+  autoAbs: boolean;
 }
 
 export function distribution(sel: Selection, dmode: DistMode): Distribution {
@@ -334,7 +344,7 @@ export function distribution(sel: Selection, dmode: DistMode): Distribution {
   const level = childLevel(ds, geo, sel.flevel);
   // Per innbygger finnes bare for kommuner/distrikter; andel gir ikke mening for alle hendelser (alltid 100 %).
   const modes = ([level.pop ? "pop" : null, sel.cls !== "*" ? "share" : null, "abs"] as (DistMode | null)[]).filter((m): m is DistMode => m != null);
-  const mode = modes.includes(dmode) ? dmode : modes[0];
+  let mode = modes.includes(dmode) ? dmode : modes[0];
   const yrs = years(sel);
   const a = monthIndex(ds, p.from), b = monthIndex(ds, p.to), M = ds.col.month;
   const n = new Map<number, number>(), t = new Map<number, number>(), series = new Map<number, number[]>();
@@ -348,6 +358,9 @@ export function distribution(sel: Selection, dmode: DistMode): Distribution {
       s[M[r] - a]++;
     }
   });
+  // Når ingen enhet har nok hendelser til pålitelige andeler eller rater, vises antall i stedet.
+  const autoAbs = mode !== "abs" && ![...n.values()].some((v) => v >= MIN_SAMPLE);
+  if (autoAbs) mode = "abs";
   let items: DistItem[] = [...t.keys()].map((k) => {
     const pop = level.pop ? level.pop(k) : null, nk = n.get(k) ?? 0, tk = t.get(k)!, none = level.none(k);
     const v = mode === "share" ? (tk ? nk / tk : 0) : mode === "pop" ? (pop ? (nk / yrs / pop) * 1000 : 0) : nk;
@@ -359,11 +372,36 @@ export function distribution(sel: Selection, dmode: DistMode): Distribution {
   items.sort((x, y) => y.n - x.n);
   items = items.slice(0, level.limit);
   items.sort((x, y) => Number(x.none) - Number(y.none) || Number(x.low) - Number(y.low) || y.v - x.v);
-  const unplaced = items.find((i) => i.none)?.n ?? null;
+  const isMissing = level.missing ?? level.none;
   return {
     level, modes, mode, items, series, months: ds.months.slice(a, b + 1), partialLast: ds.months[b] === ds.last, years: yrs,
-    unplaced, total: items.reduce((s, i) => s + i.n, 0), hasLow: items.some((i) => i.low),
+    missingN: [...n.entries()].filter(([k]) => isMissing(k)).reduce((s, [, v]) => s + v, 0),
+    totalN: [...n.values()].reduce((s, v) => s + v, 0),
+    hasLow: items.some((i) => i.low), autoAbs,
   };
+}
+
+const plural = (c: number): string => `${NF.format(c)} ${c === 1 ? "hendelse" : "hendelser"}`;
+
+/** Forklaring og merknader under Fordeling. Ren tekst, så den kan testes. */
+export function distributionTexts(sel: Selection, d: Distribution, natRate: number): { lede: string; note: string } {
+  const { ds, geo, period: p } = sel;
+  const L = d.level, what = sel.cls === "*" ? "hendelser" : `hendelser med ${tname(ds, sel.cls).toLowerCase()}`;
+  const lede = `${tname(ds, sel.cls)}, ${p.label}. ` + (
+    d.mode === "share" ? `Hver søyle viser hvor stor andel av områdets hendelser som er ${what.replace("hendelser med ", "")}. Områder med under ${MIN_SAMPLE} slike hendelser står nederst.`
+      : d.mode === "pop" ? `Hendelser per 1 000 innbyggere per år. Områder med under ${MIN_SAMPLE} hendelser står nederst.`
+        : `Antall ${what}.`);
+  const note = [
+    L.note,
+    d.autoAbs ? `Viser antall, fordi ingen ${L.places ? "steder" : "områder"} har ${MIN_SAMPLE} hendelser eller flere av denne typen. Andeler og rater ville vært misvisende.` : "",
+    d.missingN && d.totalN ? `${plural(d.missingN)} (${PF.format(d.missingN / d.totalN)} av ${NF.format(d.totalN)}) ${L.missingText ?? "er uten bydel"}.` : "",
+    !L.pop && geo.kind !== "a" ? "Per innbygger er ikke tilgjengelig her, fordi folketall finnes bare for kommuner og distrikter." : "",
+    d.mode === "pop"
+      ? `Per innbygger: hendelser per år delt på folketall (SSB ${ds.app.populationYear}). Snittet for hele landet er ${fmt1(natRate)}. Distriktene publiserer ulikt mye, så rater er ikke direkte sammenlignbare. Kommuner med mange besøkende, som byer med uteliv, får høye tall.`
+      : "",
+    d.hasLow ? `Lysere søyler bygger på under ${MIN_SAMPLE} hendelser og er usikre.` : "",
+  ].filter(Boolean).join(" ");
+  return { lede, note };
 }
 
 // ---------- Steder ----------
@@ -518,7 +556,8 @@ export function insights(sel: Selection): string[] {
         .filter((x): x is { t: string; ch: number } => x.ch != null)
         .sort((a, b) => Math.abs(b.ch) - Math.abs(a.ch));
       if (moves.length && Math.abs(moves[0].ch) >= 0.1) {
-        out.push(`Størst endring: **${tname(ds, moves[0].t)}** ${moves[0].ch > 0 ? "økte" : "falt"} med ${pct(Math.abs(moves[0].ch))} mot året før.`);
+        const mv = moves[0], mk = ds.app.tops.indexOf(mv.t);
+        out.push(`Størst endring: **${tname(ds, mv.t)}** ${mv.ch > 0 ? "økte" : "falt"} med ${pct(Math.abs(mv.ch))} mot året før (${f(prv[mk])} → ${f(cur[mk])}).`);
       }
     }
   } else {
@@ -540,7 +579,7 @@ export function insights(sel: Selection): string[] {
       ? `Vanligste kategori hos politiet: **${L.label(best[0])}** (${f(best[1])} hendelser).`
       : `Flest i **${L.label(best[0])}**: ${f(best[1])} hendelser, ${pct(best[1] / n)} av ${what}.`);
   }
-  const topPlace = geo.kind === "a" ? null
+  const topPlace = geo.kind === "a" || L.places ? null
     : [...places.entries()].filter(([a]) => !["vei", "kommune", "sentrum"].includes(areaRow(ds, a)[1])).sort((x, y) => y[1] - x[1])[0];
   if (topPlace) {
     const A = areaRow(ds, topPlace[0]);
@@ -563,6 +602,9 @@ export function insights(sel: Selection): string[] {
 
 // ---------- Hvor endrer det seg? ----------
 
+/** Færre personer enn dette gir en for tilfeldig alders- og kjønnsfordeling. */
+export const MIN_PERSONS = 30;
+
 /** Færre hendelser enn dette i begge år gir for tilfeldige endringer. */
 export const MIN_CHANGE = 10;
 
@@ -584,6 +626,8 @@ export interface ChangeStats {
   title: string;
   ups: ChangeItem[];
   downs: ChangeItem[];
+  /** Advarsel når andelen hendelser uten sted/bydel er klart ulik i de to periodene. */
+  drift: string | null;
 }
 
 /** Største endringer mot samme periode året før, på nivået under valgt område. */
@@ -591,8 +635,8 @@ export function changeStats(sel: Selection, top = 5): ChangeStats {
   const { ds, geo, period: p, test } = sel;
   const L = childLevel(ds, geo, sel.flevel);
   const title = `Hvor endrer det seg? ${L.title.replace(/^Per /, "per ")}`.trim();
-  if (geo.kind === "a") return { applicable: false, hasPrev: false, title, ups: [], downs: [] };
-  if (!p.prev) return { applicable: true, hasPrev: false, title, ups: [], downs: [] };
+  if (geo.kind === "a") return { applicable: false, hasPrev: false, title, ups: [], downs: [], drift: null };
+  if (!p.prev) return { applicable: true, hasPrev: false, title, ups: [], downs: [], drift: null };
   const cur = new Map<number, number>(), prv = new Map<number, number>();
   const count = (m: Map<number, number>) => (r: number) => {
     if (!test(r)) return;
@@ -601,12 +645,20 @@ export function changeStats(sel: Selection, top = 5): ChangeStats {
   };
   scan(sel, count(cur));
   scan(sel, count(prv), p.prev[0], p.prev[1]);
+  // Er andelen hendelser uten sted/bydel ulik i de to periodene, er endringer per område usikre.
+  const cov = { c: [0, 0], o: [0, 0] };
+  scan(sel, (r) => { cov.c[1]++; if (L.none(L.key(r))) cov.c[0]++; });
+  scan(sel, (r) => { cov.o[1]++; if (L.none(L.key(r))) cov.o[0]++; }, p.prev[0], p.prev[1]);
+  const shareC = cov.c[1] ? cov.c[0] / cov.c[1] : 0, shareO = cov.o[1] ? cov.o[0] / cov.o[1] : 0;
+  const drift = Math.abs(shareC - shareO) > 0.1 && geo.kind !== "all"
+    ? `Merk: andelen hendelser ${L.places ? "uten oppgitt sted" : "uten bydel"} var ${PF.format(shareC)} nå mot ${PF.format(shareO)} året før, så endringer per område er usikre.`
+    : null;
   const rows: ChangeItem[] = [...new Set([...cur.keys(), ...prv.keys()])]
     .map((k) => ({ key: k, k, label: L.label(k), c: cur.get(k) ?? 0, o: prv.get(k) ?? 0, d: 0, v: 0, geo: L.geo(k) }))
     .filter((x) => Math.max(x.c, x.o) >= MIN_CHANGE)
     .map((x) => ({ ...x, d: x.c - x.o }));
   return {
-    applicable: true, hasPrev: true, title,
+    applicable: true, hasPrev: true, title, drift,
     ups: rows.filter((x) => x.d > 0).sort((a, b) => b.d - a.d).slice(0, top).map((x) => ({ ...x, v: x.d })),
     downs: rows.filter((x) => x.d < 0).sort((a, b) => a.d - b.d).slice(0, top).map((x) => ({ ...x, v: -x.d, neg: true })),
   };
@@ -687,14 +739,14 @@ export type LatLngBounds = [[number, number], [number, number]];
 export const NORWAY: LatLngBounds = [[57.8, 4.5], [71.3, 31.5]];
 
 /**
- * Utsnitt for valgt område: 2.–98. persentil av stedfestede hendelser, ikke kommunegrensen
+ * Utsnitt for valgt område: 4.–96. persentil av stedfestede hendelser, ikke kommunegrensen
  * (ellers blir f.eks. Oslo dominert av Marka).
  */
 export function geoBounds(ds: Dataset, geo: GeoInfo, mask: Uint8Array): LatLngBounds {
   if (geo.kind === "all") return NORWAY;
   if (geo.kind === "a") {
     const A = areaRow(ds, geo.a ?? 0);
-    return A[3] != null && A[4] != null ? [[A[3] - 0.012, A[4] - 0.02], [A[3] + 0.012, A[4] + 0.02]] : NORWAY;
+    return A[3] != null && A[4] != null ? [[A[3] - 0.02, A[4] - 0.035], [A[3] + 0.02, A[4] + 0.035]] : NORWAY;
   }
   const lats: number[] = [], lons: number[] = [], A = ds.col.area;
   for (let r = 0; r < ds.n; r++) {
@@ -710,10 +762,17 @@ export function geoBounds(ds: Dataset, geo: GeoInfo, mask: Uint8Array): LatLngBo
   lats.sort((x, y) => x - y);
   lons.sort((x, y) => x - y);
   const q = (arr: number[], f: number) => arr[Math.min(arr.length - 1, Math.floor(arr.length * f))];
-  return [[q(lats, 0.02) - 0.005, q(lons, 0.02) - 0.01], [q(lats, 0.98) + 0.005, q(lons, 0.98) + 0.01]];
+  return [[q(lats, 0.04) - 0.004, q(lons, 0.04) - 0.008], [q(lats, 0.96) + 0.004, q(lons, 0.96) + 0.008]];
 }
 
 // ---------- Hendelser ----------
+
+/** Antall hendelser av valgt type i valgt område og periode (alle, ikke bare utvalget i Hendelser). */
+export function eventCount(sel: Selection): number {
+  let n = 0;
+  scan(sel, (r) => { if (sel.test(r)) n++; });
+  return n;
+}
 
 /** Utvalget av hendelser (samples) etter område, klasse, fritekst og periode. Listen tar med inneværende måned. */
 export function filterSamples(ds: Dataset, geo: GeoInfo, cls: string, query: string, period: PeriodInfo): Sample[] {

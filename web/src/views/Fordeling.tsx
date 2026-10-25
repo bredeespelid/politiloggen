@@ -3,7 +3,7 @@ import { BarList } from "../components/BarList";
 import { LineChart } from "../components/LineChart";
 import { Panel, Segmented } from "../components/ui";
 import { tname } from "../data/dataset";
-import { distribution, MIN_SAMPLE, nationalRate, type DistMode, type FLevel } from "../lib/aggregate";
+import { distribution, distributionTexts, MIN_SAMPLE, nationalRate, type DistMode, type FLevel } from "../lib/aggregate";
 import { fmt1, fmtNum, fmtPct, mlabel } from "../lib/format";
 import type { ViewProps } from "./types";
 
@@ -18,18 +18,11 @@ export default function Fordeling({ ds, sel, state, update }: ViewProps) {
   const multiples = d.items.filter((i) => !i.none).slice(0, 12);
   const labels = d.months.map(mlabel);
 
-  const note = [
-    L.note,
-    d.unplaced != null && d.total ? `${fmtNum(d.unplaced)} hendelser (${fmtPct(d.unplaced / d.total)}) er ${L.places ? "uten oppgitt sted" : "uten bydel"}.` : "",
-    mode === "pop"
-      ? `Per innbygger: hendelser per år delt på folketall (SSB ${ds.app.populationYear}). Snittet for hele landet er ${fmt1(natRate)}. Kommuner med mange besøkende, som byer med uteliv, får høye tall.`
-      : "",
-    d.hasLow ? `Lysere søyler bygger på under ${MIN_SAMPLE} hendelser og er usikre.` : "",
-  ].filter(Boolean).join(" ");
+  const { lede, note } = distributionTexts(sel, d, natRate);
 
   return (
     <div className="grid">
-      <Panel span={5} id="f-title" title={L.title} lede={`${tname(ds, state.cls)}, ${sel.period.label}.`}>
+      <Panel span={5} id="f-title" title={L.title} lede={lede}>
         {sel.geo.kind === "m" && sel.geo.hasBydel && (
           <Segmented<FLevel> label="Nivå" value={state.flevel} options={LEVEL_OPTIONS} onChange={(flevel) => update({ flevel })} />
         )}

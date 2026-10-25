@@ -26,9 +26,12 @@ function FindPlace({ ds, geo, update }: Pick<Props, "ds" | "geo" | "update">) {
 
   const pick = (value: string) => {
     if (!value.trim()) return;
-    const a = resolvePlace(options, value);
-    setBad(a == null);
-    if (a != null) update({ geo: `a:${a}` });
+    const hit = resolvePlace(options, value, geo.k ? muniName(ds, geo.k) : null);
+    setBad(hit == null);
+    if (hit) {
+      setText(hit.value);
+      update({ geo: `a:${hit.a}` });
+    }
   };
   return (
     <label className="search place-search">Finn sted
@@ -123,7 +126,7 @@ export function Filters({ ds, state, geo, update }: Props) {
       </div>
       {!isDefaultFilter(state) && (
         <button type="button" className="reset" onClick={() => update({ geo: DEFAULT_GEO, cls: "*", period: "12m" })}>
-          Tilbake til Oslo, alle hendelser
+          Nullstill filter (Oslo, alle hendelser)
         </button>
       )}
     </div>

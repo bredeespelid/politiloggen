@@ -11,7 +11,10 @@ import { bydelLabels, labelFits, placeLabel, type Placed } from "../map/labels";
 import type { MapKind, MapView } from "../state/appState";
 import type { ViewProps } from "./types";
 
-const VIEWS = [["geo", "Zoom: valgt område"], ["norge", "Hele landet"]] as const;
+const VIEWS = [
+  ["geo", "Zoom: valgt område", "Zoom til valgt område"],
+  ["norge", "Zoom ut: Norge", "Zoom ut til hele Norge. Kartet viser fortsatt bare valgt område."],
+] as const;
 const KINDS = [["heat", "Heatmap"], ["dots", "Punkter"]] as const;
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]!);
 const ring = (r: [number, number][]) => r.map(([x, y]) => [y, x] as [number, number]);
@@ -215,6 +218,7 @@ export default function Kart({ ds, sel, state, update, scheme }: ViewProps) {
         <p className="note">
           {cov} av hendelsene {g.kind === "a" ? "i kommunen" : "i utvalget"} har et sted som er slått opp i Kartverket ({fmtNum(data.located)} av {fmtNum(data.total)}).
           Veier, tunneler og hendelser uten oppgitt sted vises ikke. Klikk et sted eller en bydel for å velge det.
+          {state.mview === "norge" && g.kind !== "all" && ` Kartet viser bare ${g.label}. Velg «Hele landet» under Område for å se alle.`}
           {tiles === "feil" && " Bakgrunnskartet fra Kartverket kunne ikke lastes, så bare grensene vises."}
         </p>
       </section>

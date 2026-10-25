@@ -121,10 +121,16 @@ export function placeOptions(ds: Dataset): PlaceOption[] {
   return out;
 }
 
-/** Slår opp det brukeren skrev: eksakt treff, ellers første som begynner med teksten. */
-export function resolvePlace(options: PlaceOption[], text: string): number | null {
+/**
+ * Slår opp det brukeren skrev: eksakt treff, ellers treffene som begynner med teksten.
+ * Ved flere treff vinner stedet i gjeldende kommune (preferMuni), ellers det mest brukte.
+ * Returnerer hele valget, så feltet kan vise det fullstendige navnet.
+ */
+export function resolvePlace(options: PlaceOption[], text: string, preferMuni?: string | null): PlaceOption | null {
   const v = text.trim().toLowerCase();
   if (!v) return null;
-  const hit = options.find((o) => o.value.toLowerCase() === v) ?? options.find((o) => o.value.toLowerCase().startsWith(v));
-  return hit ? hit.a : null;
+  const exact = options.find((o) => o.value.toLowerCase() === v);
+  if (exact) return exact;
+  const hits = options.filter((o) => o.value.toLowerCase().startsWith(v));
+  return (preferMuni ? hits.find((o) => o.value.endsWith(`, ${preferMuni}`)) : undefined) ?? hits[0] ?? null;
 }

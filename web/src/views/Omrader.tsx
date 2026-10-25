@@ -67,7 +67,7 @@ export default function Omrader({ ds, sel, state, update }: ViewProps) {
                   {showMuni ? <th scope="col" className="hide-sm">Kommune</th> : g.hasBydel ? <th scope="col" className="hide-sm">Bydel</th> : null}
                   <th scope="col" className="r">Hendelser</th>
                   <th scope="col" className="hide-sm"><span className="sr-only">Søyle</span></th>
-                  {withCls && <th scope="col" className="r">Andel av stedets hendelser</th>}
+                  {withCls && <th scope="col" className="r">{tname(ds, state.cls)} som andel av stedets hendelser</th>}
                 </tr>
               </thead>
               <tbody>
@@ -79,7 +79,7 @@ export default function Omrader({ ds, sel, state, update }: ViewProps) {
                       onPointerMove={h.onPointerMove} onPointerLeave={h.onPointerLeave} onFocus={h.onFocus} onBlur={h.onBlur}>
                       <td>{areaLabel(row)}</td>
                       <td className="hide-sm"><span className="atype">{ATYPE_NAME[row[1]] ?? row[1]}</span></td>
-                      {showMuni ? <td className="hide-sm">{muniName(ds, row[5])}</td> : g.hasBydel ? <td className="hide-sm">{row[2] || "–"}</td> : null}
+                      {showMuni ? <td className="hide-sm">{muniName(ds, row[5])}</td> : g.hasBydel ? <td className="hide-sm">{row[2] ? (row[2] === "Sentrum" ? "Sentrum (bydel)" : row[2]) : "ikke koblet til bydel"}</td> : null}
                       <td className="n">{fmtNum(v)}</td>
                       <td className="bar-cell hide-sm" aria-hidden="true"><span style={{ width: `${((v / maxTop) * 100).toFixed(1)}%` }} /></td>
                       {withCls && <td className="n">{fmtPct(all ? v / all : 0)}</td>}

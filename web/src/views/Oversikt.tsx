@@ -5,7 +5,7 @@ import { PERSON_SERIES, PersonsChart } from "../components/PersonsChart";
 import { KpiRow, Panel, type KpiItem } from "../components/ui";
 import { childrenOf, tname, topOf } from "../data/dataset";
 import {
-  MIN_CHANGE, changeStats, days, insights, kpiStats, monthlyTrend, nationalRate, outcomeStats, personStats, subClassItems, topClassItems, years,
+  MIN_CHANGE, MIN_PERSONS, changeStats, days, insights, kpiStats, monthlyTrend, nationalRate, outcomeStats, personStats, subClassItems, topClassItems, years,
 } from "../lib/aggregate";
 import { OUT_LABEL, fmt1, fmtNum, fmtPct, mlabel } from "../lib/format";
 import { ctx, type ViewProps } from "./types";
@@ -44,14 +44,16 @@ export default function Oversikt({ ds, sel, state, update }: ViewProps) {
     k.pop
       ? {
         k: "Per 1 000 innbyggere per år", v: fmt1(k.n / yrs / k.pop * 1000),
-        d: sel.geo.kind === "all" ? `${fmtNum(k.pop)} innbyggere (SSB ${popYear})` : `Hele landet: ${fmt1(natRate)} · SSB ${popYear}`,
+        d: sel.geo.kind === "all" ? `${fmtNum(k.pop)} innbyggere (SSB ${popYear})` : `Hele landet: ${fmt1(natRate)}. Distriktene publiserer ulikt, så rater kan ikke sammenlignes direkte.`,
       }
-      : { k: "Hendelser per dag", v: fmt1(k.n / days(sel)), d: "snitt i perioden" },
+      : k.n / days(sel) < 0.5
+        ? { k: "Hendelser per måned", v: fmt1((k.n / days(sel)) * 30.4), d: "snitt i perioden" }
+        : { k: "Hendelser per dag", v: fmt1(k.n / days(sel)), d: "snitt i perioden" },
   ];
 
   const pts = trend.pts.map((x) => ({ ...x, label: mlabel(x.m) }));
   const hasKids = top !== "*" && childrenOf(ds, top).length > 0;
-  const personsEnough = persons.total >= 10;
+  const personsEnough = persons.total >= MIN_PERSONS;
 
   return (
     <div className="grid">
@@ -101,7 +103,7 @@ export default function Oversikt({ ds, sel, state, update }: ViewProps) {
       {changes.applicable && (
         <Panel span={12} id="chg-title" title={changes.title}
           lede={changes.hasPrev
-            ? `${tname(ds, cls)}, ${p.label} mot året før. Endring i antall hendelser; bare steder med minst ${MIN_CHANGE} hendelser i ett av årene.`
+            ? `${tname(ds, cls)}, ${p.label} mot året før. Endring i antall hendelser; bare steder med minst ${MIN_CHANGE} hendelser i ett av årene.${changes.drift ? ` ${changes.drift}` : ""}`
             : "Velg «Siste 12 hele mnd» eller 2025 for å sammenligne med året før."}>
           {changes.hasPrev && (
             <div className="chg-grid">
@@ -144,7 +146,7 @@ export default function Oversikt({ ds, sel, state, update }: ViewProps) {
             </p>
           </>
         ) : (
-          <p className="note">{persons.total ? `Bare ${fmtNum(persons.total)} personer er omtalt` : "Ingen personer er omtalt"} med kjønn og alder i utvalget – for få til å vise en fordeling. Prøv et større område eller en lengre periode.</p>
+          <p className="note">{persons.total ? `Bare ${fmtNum(persons.total)} personer er omtalt` : "Ingen personer er omtalt"} med kjønn og alder i utvalget – for få til å vise en pålitelig fordeling (minst {MIN_PERSONS} trengs). Prøv et større område eller en lengre periode.</p>
         )}
       </Panel>
     </div>
